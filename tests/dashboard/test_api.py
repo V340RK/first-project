@@ -11,6 +11,21 @@ from fastapi.testclient import TestClient
 from scalper.dashboard.config import DashboardConfig
 from scalper.dashboard.controller import BotController, BotStatus
 from scalper.dashboard.server import create_app
+from scalper.dashboard.symbols import BinanceSymbolService, SymbolInfo
+
+
+def _fake_symbol_service(symbols: list[str] = ["BTCUSDT", "ETHUSDT"]):   # type: ignore[no-untyped-def]
+    svc = MagicMock(spec=BinanceSymbolService)
+    infos = [
+        SymbolInfo(symbol=s, base=s.replace("USDT", ""), quote="USDT",
+                   tick_size=0.1, step_size=0.001, min_notional=5.0)
+        for s in symbols
+    ]
+    async def _list(): return infos
+    async def _is_valid(x): return x.upper() in symbols
+    svc.list_symbols = _list
+    svc.is_valid = _is_valid
+    return svc
 
 
 @pytest.fixture()
@@ -22,7 +37,7 @@ def app_with_fake_controller(tmp_path: Path):   # type: ignore[no-untyped-def]
     )
     cfg = DashboardConfig(journal_dir=tmp_path / "journal")
     cfg.journal_dir.mkdir()
-    app = create_app(cfg, controller=ctrl)
+    app = create_app(cfg, controller=ctrl, symbol_service=_fake_symbol_service())
     return app, ctrl
 
 
@@ -98,6 +113,48 @@ def test_start_without_controller_returns_503(tmp_path: Path) -> None:
             "risk_per_trade_usd": 0.1, "equity_usd": 50.0, "mode": "paper",
         })
         assert r.status_code == 503
+
+
+def test_list_symbols_endpoint(app_with_fake_controller) -> None:   # type: ignore[no-untyped-def]
+    app, _ = app_with_fake_controller
+    with TestClient(app) as client:
+        r = client.get("/api/symbols")
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body) == 2
+        assert body[0]["symbol"] == "BTCUSDT"
+        assert body[0]["base"] == "BTC"
+        assert body[0]["quote"] == "USDT"
+        assert body[0]["tick_size"] == 0.1
+
+
+def test_start_rejects_unknown_symbols(app_with_fake_controller) -> None:   # type: ignore[no-untyped-def]
+    app, ctrl = app_with_fake_controller
+    with TestClient(app) as client:
+        r = client.post("/api/bot/start", json={
+            "symbols": ["BTCUSDT", "FAKEUSDT"],
+            "leverage": 5, "risk_per_trade_usd": 0.5,
+            "equity_usd": 100.0, "mode": "paper",
+        })
+        assert r.status_code == 422
+        assert "FAKEUSDT" in r.json()["detail"]
+        ctrl.start.assert_not_called()
+
+
+def test_start_normalizes_symbol_case(app_with_fake_controller) -> None:   # type: ignore[no-untyped-def]
+    app, ctrl = app_with_fake_controller
+    ctrl.start.return_value = BotStatus(
+        running=True, pid=1, started_at_ms=0, params=None, exit_code=None,
+    )
+    with TestClient(app) as client:
+        r = client.post("/api/bot/start", json={
+            "symbols": ["btcusdt", "Ethusdt"],
+            "leverage": 5, "risk_per_trade_usd": 0.5,
+            "equity_usd": 100.0, "mode": "paper",
+        })
+        assert r.status_code == 200
+        called = ctrl.start.call_args.args[0]
+        assert called.symbols == ["BTCUSDT", "ETHUSDT"]
 
 
 def test_start_validates_payload(app_with_fake_controller) -> None:   # type: ignore[no-untyped-def]

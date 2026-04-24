@@ -29,6 +29,7 @@ from scalper.common import time as _time
 from scalper.dashboard.config import DashboardConfig
 from scalper.dashboard.controller import BotController, BotRunParams
 from scalper.dashboard.stats import SessionStats
+from scalper.dashboard.symbols import BinanceSymbolService
 from scalper.dashboard.tailer import JournalTailer
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ class DashboardServer:
         config: DashboardConfig,
         tailer: JournalTailer | None = None,
         controller: BotController | None = None,
+        symbol_service: BinanceSymbolService | None = None,
     ) -> None:
         self._config = config
         self._tailer = tailer if tailer is not None else JournalTailer(
@@ -61,6 +63,7 @@ class DashboardServer:
         )
         self._controller = controller
         self._stats = SessionStats(self._tailer)
+        self._symbol_service = symbol_service
         self._connected_clients: int = 0
 
     @property
@@ -121,14 +124,46 @@ class DashboardServer:
                 "session": asdict(snap),
             })
 
+        @app.get("/api/symbols")
+        async def list_symbols() -> JSONResponse:
+            if self._symbol_service is None:
+                raise HTTPException(503, "symbol service not configured")
+            try:
+                syms = await self._symbol_service.list_symbols()
+            except Exception as e:
+                raise HTTPException(502, f"exchangeInfo unreachable: {e}") from e
+            return JSONResponse([
+                {"symbol": s.symbol, "base": s.base, "quote": s.quote,
+                 "tick_size": s.tick_size, "step_size": s.step_size}
+                for s in syms
+            ])
+
         @app.post("/api/bot/start")
         async def bot_start(req: StartBotRequest) -> JSONResponse:
             if self._controller is None:
                 raise HTTPException(503, "bot controller not configured")
             if self._controller.is_running():
                 raise HTTPException(409, "bot already running")
+
+            # Валідація символів — якщо SymbolService доступний, всі мають бути в TRADING.
+            if self._symbol_service is not None:
+                try:
+                    available = {s.symbol for s in await self._symbol_service.list_symbols()}
+                except Exception as e:
+                    raise HTTPException(502, f"cannot validate symbols: {e}") from e
+                requested = [s.upper() for s in req.symbols]
+                unknown = [s for s in requested if s not in available]
+                if unknown:
+                    raise HTTPException(
+                        422, f"невідомі пари на Binance: {', '.join(unknown)}",
+                    )
+                # Нормалізуємо до UPPERCASE
+                normalized_symbols = requested
+            else:
+                normalized_symbols = [s.upper() for s in req.symbols]
+
             params = BotRunParams(
-                symbols=req.symbols, leverage=req.leverage,
+                symbols=normalized_symbols, leverage=req.leverage,
                 risk_per_trade_usd=req.risk_per_trade_usd,
                 equity_usd=req.equity_usd, mode=req.mode,
                 score_threshold_override=req.score_threshold_override,
@@ -200,10 +235,12 @@ class DashboardServer:
 
 
 def create_app(
-    config: DashboardConfig, controller: BotController | None = None,
+    config: DashboardConfig,
+    controller: BotController | None = None,
+    symbol_service: BinanceSymbolService | None = None,
 ) -> FastAPI:
     """Фабрика для uvicorn. Якщо controller=None — UI буде read-only."""
-    server = DashboardServer(config, controller=controller)
+    server = DashboardServer(config, controller=controller, symbol_service=symbol_service)
     return server.build_app()
 
 

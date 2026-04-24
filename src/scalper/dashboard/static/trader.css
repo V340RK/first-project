@@ -93,6 +93,124 @@ body {
     gap: 4px;
 }
 
+.chips-box {
+    position: relative;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    min-height: 42px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    cursor: text;
+}
+
+.chips-box:focus-within {
+    border-color: var(--accent);
+}
+
+.chips {
+    display: contents;
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 4px 4px 10px;
+    background: rgba(94, 234, 212, 0.15);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.chip-remove {
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0 6px;
+    border-radius: 50%;
+    opacity: 0.6;
+}
+
+.chip-remove:hover {
+    opacity: 1;
+    background: rgba(94, 234, 212, 0.2);
+}
+
+#pair-input {
+    border: none !important;
+    background: transparent !important;
+    flex: 1;
+    min-width: 150px;
+    padding: 4px !important;
+    outline: none !important;
+}
+
+.dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    max-height: 280px;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    z-index: 10;
+}
+
+.dropdown.hidden {
+    display: none;
+}
+
+.dropdown-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+}
+
+.dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.dropdown-item:hover,
+.dropdown-item.active {
+    background: rgba(94, 234, 212, 0.1);
+    color: var(--accent);
+}
+
+.dropdown-item .sym {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.dropdown-item .meta {
+    color: var(--text-dim);
+    font-size: 11px;
+}
+
+.dropdown-empty {
+    padding: 12px;
+    color: var(--text-dim);
+    font-size: 13px;
+    text-align: center;
+}
+
 .two-col {
     display: grid;
     grid-template-columns: 1fr 1fr;

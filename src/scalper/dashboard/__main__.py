@@ -14,6 +14,7 @@ import uvicorn
 from scalper.dashboard.config import DashboardConfig
 from scalper.dashboard.controller import BotController
 from scalper.dashboard.server import create_app
+from scalper.dashboard.symbols import BinanceSymbolService
 
 
 def main() -> None:
@@ -29,6 +30,9 @@ def main() -> None:
                         help="Куди писати runtime config для запусків з UI")
     parser.add_argument("--no-controller", action="store_true",
                         help="Read-only режим — UI без кнопок старт/стоп")
+    parser.add_argument("--binance-base-url", type=str, default=None,
+                        help="Base URL для exchangeInfo. За замовчанням — з .env "
+                             "(BINANCE_TESTNET=true → testnet, інакше prod)")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -52,7 +56,20 @@ def main() -> None:
             runtime_config_path=args.runtime_config,
         )
 
-    app = create_app(config, controller=controller)
+    # SymbolService: визначаємо base_url з flags або .env
+    base_url = args.binance_base_url
+    if base_url is None:
+        from dotenv import load_dotenv
+        import os as _os
+        load_dotenv(override=False)
+        testnet = _os.environ.get("BINANCE_TESTNET", "true").strip().lower() in ("1", "true", "yes", "on")
+        base_url = (
+            "https://testnet.binancefuture.com" if testnet
+            else "https://fapi.binance.com"
+        )
+    symbol_service = BinanceSymbolService(base_url)
+
+    app = create_app(config, controller=controller, symbol_service=symbol_service)
     uvicorn.run(app, host=config.host, port=config.port, log_level=args.log_level.lower())
 
 

@@ -14,11 +14,14 @@
         </header>
 
         <section class="card">
-            <label class="label">Пари (можна кілька):</label>
-            <div class="pair-row">
-                <input type="text" id="pair-input" placeholder="BTCUSDT, ETHUSDT, SOLUSDT…" />
-                <div class="hint">через кому. Регістр не важливий.</div>
+            <label class="label">Пари з Binance Futures USDT-M (<span id="symbols-count">—</span> доступно):</label>
+            <div class="chips-box" id="chips-box">
+                <div class="chips" id="chips"></div>
+                <input type="text" id="pair-input" autocomplete="off"
+                       placeholder="Почни вводити: BTC, ETH, SOL…" />
+                <div class="dropdown hidden" id="symbol-dropdown"></div>
             </div>
+            <div class="hint">Клік по пропозиції або Enter — додає чіп. Backspace на пусте поле — видаляє останній.</div>
         </section>
 
         <section class="card two-col">
