@@ -44,6 +44,7 @@ class AppConfig(BaseModel):
     symbols: list[str] = Field(default_factory=lambda: ["BTCUSDT"])
     mode: str = "paper"                   # 'live' | 'replay' | 'paper'
     equity_usd: float = 1000.0
+    leverage: int = Field(default=5, ge=1, le=125)
 
     gateway: GatewayConfig
     book: OBConfig = Field(default_factory=OBConfig)

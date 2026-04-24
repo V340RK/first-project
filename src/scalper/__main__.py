@@ -60,6 +60,7 @@ async def run(cfg: AppConfig) -> None:
         execution: ExecutionEngine | SimulatedExecutionEngine = ExecutionEngine(
             cfg.execution, order_transport,
         )
+        # Leverage встановлюємо після gateway.start() (нижче), щоб REST працював
     elif cfg.mode == "paper":
         execution = SimulatedExecutionEngine(SimulatorConfig())
     elif cfg.mode == "replay":
@@ -107,6 +108,17 @@ async def run(cfg: AppConfig) -> None:
         pass   # Windows: signals обмежені; stop_event може спрацьовувати ззовні
 
     await orchestrator.start(cfg.symbols)
+
+    # Встановити leverage для кожного символу (тільки в live mode — paper не
+    # шле REST ордери, та й leverage не потрібен для SimulatedExecutionEngine).
+    if cfg.mode == "live":
+        for sym in cfg.symbols:
+            try:
+                await gateway.set_leverage(sym, cfg.leverage)
+                logger.info("leverage set: %s x%d", sym, cfg.leverage)
+            except Exception as e:
+                logger.error("failed to set leverage for %s: %s", sym, e)
+
     logger.info("scalper up. Press Ctrl+C to stop.")
 
     try:

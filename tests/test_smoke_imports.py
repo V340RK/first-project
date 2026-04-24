@@ -52,5 +52,8 @@ def test_gateway_and_replay_share_api() -> None:
     missing = public(MarketDataGateway) - public(ReplayGateway)
     # Дозволяємо лише ping/get_server_time_offset_ms/get_rate_limit_weight
     # (інфраструктурні, не потрібні в replay).
-    allowed_missing = {"ping", "get_server_time_offset_ms", "get_rate_limit_weight"}
+    allowed_missing = {
+        "ping", "get_server_time_offset_ms", "get_rate_limit_weight",
+        "set_leverage",   # live-only: replay не шле REST приватних
+    }
     assert missing <= allowed_missing, f"ReplayGateway втратив API: {missing - allowed_missing}"

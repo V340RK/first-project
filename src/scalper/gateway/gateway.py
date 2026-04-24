@@ -185,6 +185,20 @@ class MarketDataGateway:
         await self._transport.public_get("/fapi/v1/ping", weight=1)
         return clock() - start_ms
 
+    async def set_leverage(self, symbol: str, leverage: int) -> dict:
+        """POST /fapi/v1/leverage — встановлює плече для символу.
+
+        Binance: 1 ≤ leverage ≤ 125 (залежить від символу + tier). Виклик
+        ідемпотентний: повторний set зі тим же значенням — no-op.
+        """
+        if not 1 <= leverage <= 125:
+            raise ValueError(f"leverage must be in [1, 125], got {leverage}")
+        return await self._transport.private_post(
+            "/fapi/v1/leverage",
+            params={"symbol": symbol.upper(), "leverage": leverage},
+            weight=1,
+        )
+
     # === Internal: market WS ===
 
     def _build_market_streams(self) -> list[str]:
