@@ -1,0 +1,162 @@
+:root {
+    --bg: #0f1419;
+    --bg-panel: #151b23;
+    --bg-hover: #1e2631;
+    --fg: #c9d1d9;
+    --fg-muted: #8b949e;
+    --accent: #58a6ff;
+    --border: #30363d;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+    --info: #79c0ff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-size: 13px;
+    height: 100%;
+}
+
+header {
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+h1 { margin: 0; font-size: 16px; font-weight: 600; color: var(--accent); }
+h2 { margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+
+.status-bar {
+    display: flex; gap: 8px; flex-wrap: wrap;
+}
+
+.badge {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-family: ui-monospace, "JetBrains Mono", Consolas, monospace;
+}
+
+#ws-status[data-state="connected"] { border-color: var(--ok); color: var(--ok); }
+#ws-status[data-state="connecting"] { border-color: var(--warn); color: var(--warn); }
+#ws-status[data-state="disconnected"] { border-color: var(--err); color: var(--err); }
+
+main {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 16px;
+    padding: 16px 20px;
+}
+
+@media (max-width: 720px) {
+    main { grid-template-columns: 1fr; }
+}
+
+.panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+#kinds-list {
+    list-style: none; padding: 0; margin: 0;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px;
+}
+#kinds-list li {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 6px;
+    border-radius: 4px;
+}
+#kinds-list li:hover { background: var(--bg-hover); }
+#kinds-list .count { color: var(--fg-muted); }
+
+.events-controls {
+    display: flex; gap: 8px; margin-bottom: 8px;
+}
+#filter-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px;
+}
+button {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+button:hover { background: var(--bg-hover); border-color: var(--accent); }
+button.paused { border-color: var(--warn); color: var(--warn); }
+
+#events-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px;
+}
+#events-table th {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    color: var(--fg-muted);
+    font-weight: 500;
+    position: sticky;
+    top: 0;
+    background: var(--bg-panel);
+}
+#events-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+}
+#events-table tbody tr:hover { background: var(--bg-hover); }
+
+.kind-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    white-space: nowrap;
+}
+.kind-startup, .kind-shutdown, .kind-daily_rollover { border-color: var(--accent); color: var(--accent); }
+.kind-heartbeat { border-color: var(--border); color: var(--fg-muted); }
+.kind-warning { border-color: var(--warn); color: var(--warn); }
+.kind-error { border-color: var(--err); color: var(--err); }
+.kind-decision_accepted, .kind-decision_rejected,
+.kind-position_opened, .kind-position_closed,
+.kind-trade_outcome { border-color: var(--info); color: var(--info); }
+
+.payload {
+    color: var(--fg-muted);
+    max-width: 600px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.payload.expanded { white-space: pre-wrap; overflow: visible; }

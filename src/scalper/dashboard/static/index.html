@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scalper Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>Scalper Dashboard</h1>
+        <div class="status-bar">
+            <span class="badge" id="ws-status" data-state="connecting">WS: connecting…</span>
+            <span class="badge" id="event-count">events: 0</span>
+            <span class="badge" id="rate">rate: 0/min</span>
+            <span class="badge" id="last-event">last: —</span>
+            <span class="badge" id="server-time">UTC: —</span>
+        </div>
+    </header>
+
+    <main>
+        <section class="panel" id="kinds-panel">
+            <h2>Kinds (live breakdown)</h2>
+            <ul id="kinds-list"></ul>
+        </section>
+
+        <section class="panel" id="events-panel">
+            <h2>Events (newest on top)</h2>
+            <div class="events-controls">
+                <input type="text" id="filter-input" placeholder="filter by kind/symbol/trade_id…" />
+                <button id="pause-btn">Pause</button>
+                <button id="clear-btn">Clear</button>
+            </div>
+            <table id="events-table">
+                <thead>
+                    <tr>
+                        <th>time (UTC)</th>
+                        <th>seq</th>
+                        <th>kind</th>
+                        <th>symbol</th>
+                        <th>trade_id</th>
+                        <th>payload</th>
+                    </tr>
+                </thead>
+                <tbody id="events-tbody"></tbody>
+            </table>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:support.tiger.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:dm13450.github.io)",
+      "WebFetch(domain:bookmap.com)",
+      "WebFetch(domain:www.nadcab.com)",
+      "Bash(where pdftoppm *)",
+      "Bash(where pdftotext *)",
+      "Bash(pdftotext -layout \"d:/Перший проект/DOCS/Smart Money.pdf\" \"d:/Перший проект/DOCS/smart_money_text.txt\")",
+      "Bash(\"/c/Program Files/Git/mingw64/bin/pdftotext.exe\" -layout \"d:/Перший проект/DOCS/Скальпінг.pdf\" \"d:/Перший проект/DOCS/scalping_text.txt\")",
+      "Bash(python -c ' *)",
+      "Bash(unzip -p \"Скальпінг.docx\" word/document.xml)",
+      "Read(//tmp/**)",
+      "Bash(grep -v '^$')",
+      "Bash(awk '/^Урок [0-9]+\\\\./{flag=1} flag{printf \"%s \", $0; if\\(/[.!?]$/ || length<3\\){print \"\"; flag=0}}' /tmp/docx_text.txt)",
+      "Bash(awk '/^УРОК /{print NR\": \"substr\\($0, 1, 120\\)}' /tmp/docx_flat.txt)",
+      "Bash(awk '/^УРОК /{print NR, length\\($0\\)}' /tmp/docx_flat.txt)",
+      "Bash(awk 'NR==10' /tmp/docx_flat.txt)",
+      "Bash(awk 'NR==11' /tmp/docx_flat.txt)",
+      "Bash(awk 'NR==15' /tmp/docx_flat.txt)",
+      "Bash(awk 'NR==7' /tmp/docx_flat.txt)"
+    ],
+    "defaultMode": "bypassPermissions",
+    "additionalDirectories": [
+      "\\tmp"
+    ]
+  }
+}

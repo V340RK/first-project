@@ -1,0 +1,127 @@
+# settings.example.yaml — повний приклад конфігурації.
+# Скопіюй у settings.yaml і заповни secrets окремо в configs/secrets.yaml.
+
+mode: live                          # live | replay | paper
+symbols: [BTCUSDT]
+
+# === 01 Gateway ===
+gateway:
+  base_url: https://fapi.binance.com
+  ws_url: wss://fstream.binance.com
+  testnet: false
+  reconnect_backoff_ms: [500, 1000, 2000, 5000, 10000]
+  depth_levels: 50
+
+# === 02 Order Book ===
+order_book:
+  buffer_diff_seconds: 60           # на скільки буферизуємо diff-и при init/resync
+
+# === 03 Tape ===
+tape:
+  windows_ms: [500, 2000]
+  burst_threshold_z: 2.0            # z-score для aggressive_*_burst
+  cvd_reset_at: "00:00 UTC"
+
+# === 04 Features ===
+features:
+  book_evolution_window_ms: 5000
+  pullback_min_depth_ticks: 3
+
+# === 05 Regime ===
+regime:
+  reclassify_interval_s: 60
+  atr_window_min: 15
+  spread_threshold_low_liq_ticks: 5
+  trending_adx_min: 25
+
+# === 06 Setups ===
+setups:
+  enabled:
+    - absorption_reversal
+    - stacked_imbalance
+    - micro_pullback_continuation
+  absorption_reversal:
+    min_absorption_score: 0.7
+    rr_target: 3.0
+  micro_pullback_continuation:
+    min_depth_ticks: 3
+    max_duration_ms: 8000
+
+# === 07 Decision ===
+decision:
+  score_threshold: 1.0
+  weights:
+    htf_poi_bonus: 0.5
+    regime_tailwind: 0.3
+    regime_headwind: 0.4
+    spread_penalty: 0.3
+    spread_penalty_threshold: 3
+    loss_streak_penalty_per_loss: 0.2
+    expectancy_multiplier_scale: 0.5
+  cooldown_per_setup_ms: 60000
+  cooldown_per_symbol_ms: 30000
+  time_stop_ms_per_setup:
+    absorption_reversal: 180000
+    micro_pullback_continuation: 90000
+
+# === 08 Risk ===
+risk:
+  risk_per_trade_usd_abs: 10.0
+  risk_per_trade_pct: 0.003
+  slippage_buffer_ticks: 1
+
+  # FALLBACK-и (source of truth — ExchangeInfo з Gateway)
+  fallback_min_qty: 0.001
+  fallback_max_qty: 10.0
+  fallback_step_size: 0.001
+  fallback_tick_size: 0.1
+  fallback_min_notional: 5.0
+
+  daily_loss_limit_R: 3
+  monthly_loss_limit_R: 10
+  max_trades_per_day: 10
+  max_concurrent_positions: 1
+
+  loss_streak_cooldown_trigger: 3
+  loss_streak_cooldown_ms: 1800000
+  loss_streak_hard_limit: 5
+
+  store_path: data/risk_state.sqlite
+
+# === 09 Execution ===
+execution:
+  retry_max_attempts: 3
+  retry_backoff_ms: [200, 500, 1500]
+  client_order_id_prefix: scl
+
+# === 10 Position ===
+position:
+  tp_split: [0.50, 0.25, 0.25]      # TP1/TP2/TP3 розподіл
+  trailing_after_tp2_ticks: 3
+
+# === 11 Journal ===
+journal:
+  path: data/journal/
+  batch_size: 100
+  flush_interval_ms: 1000
+  rotate_bytes: 104857600           # 100 MB
+
+# === 12 Replay (для mode=replay) ===
+replay:
+  data_dir: data/recordings/
+  speed: 0.0                        # 0 = max, 1.0 = realtime
+
+# === 13 Expectancy ===
+expectancy:
+  window_size: 50
+  min_sample_for_suspend: 20
+  suspend_threshold_R: -0.2
+  resume_threshold_R: 0.0
+  cooldown_after_resume_ms: 86400000
+
+# === Notifications ===
+notifications:
+  channels: [stdout, telegram]
+  telegram:
+    chat_id: 0
+    rate_limit_per_min: 20
