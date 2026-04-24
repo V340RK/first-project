@@ -18,12 +18,17 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from dataclasses import asdict
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from scalper.common import time as _time
 from scalper.dashboard.config import DashboardConfig
+from scalper.dashboard.controller import BotController, BotRunParams
+from scalper.dashboard.stats import SessionStats
 from scalper.dashboard.tailer import JournalTailer
 
 logger = logging.getLogger(__name__)
@@ -31,15 +36,31 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 
 
-class DashboardServer:
-    """Тримає FastAPI app + фоновий JournalTailer. Запускається через uvicorn."""
+class StartBotRequest(BaseModel):
+    symbols: list[str] = Field(min_length=1)
+    leverage: int = Field(ge=1, le=125)
+    risk_per_trade_usd: float = Field(gt=0)
+    equity_usd: float = Field(gt=0)
+    mode: str = "live"                 # 'live' | 'paper'
+    score_threshold_override: float | None = None
 
-    def __init__(self, config: DashboardConfig, tailer: JournalTailer | None = None) -> None:
+
+class DashboardServer:
+    """Тримає FastAPI app + фоновий JournalTailer + BotController."""
+
+    def __init__(
+        self,
+        config: DashboardConfig,
+        tailer: JournalTailer | None = None,
+        controller: BotController | None = None,
+    ) -> None:
         self._config = config
         self._tailer = tailer if tailer is not None else JournalTailer(
             journal_dir=config.journal_dir,
             poll_interval_ms=config.poll_interval_ms,
         )
+        self._controller = controller
+        self._stats = SessionStats(self._tailer)
         self._connected_clients: int = 0
 
     @property
@@ -50,11 +71,16 @@ class DashboardServer:
         @asynccontextmanager
         async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
             await self._tailer.start()
+            await self._stats.start()
             logger.info("Dashboard tailer started; watching %s", self._config.journal_dir)
             try:
                 yield
             finally:
+                await self._stats.stop()
                 await self._tailer.stop()
+                if self._controller is not None and self._controller.is_running():
+                    logger.info("Shutting down managed bot subprocess")
+                    self._controller.stop()
                 logger.info("Dashboard tailer stopped")
 
         app = FastAPI(title="Scalper Dashboard", lifespan=lifespan)
@@ -67,6 +93,11 @@ class DashboardServer:
         async def index() -> FileResponse:
             return FileResponse(STATIC_DIR / "index.html")
 
+        @app.get("/app")
+        async def trader_app() -> FileResponse:
+            """Trader control panel (відповідає мокапу V340RK)."""
+            return FileResponse(STATIC_DIR / "trader.html")
+
         @app.get("/api/status")
         async def status() -> JSONResponse:
             return JSONResponse({
@@ -76,6 +107,42 @@ class DashboardServer:
                 "tailer_subscribers": self._tailer.subscriber_count,
                 "server_time_ms": _time.clock(),
             })
+
+        @app.get("/api/bot/status")
+        async def bot_status() -> JSONResponse:
+            snap = self._stats.snapshot()
+            ctrl_status = (
+                asdict(self._controller.status()) if self._controller else
+                {"running": False, "pid": None, "started_at_ms": None,
+                 "params": None, "exit_code": None}
+            )
+            return JSONResponse({
+                "bot": ctrl_status,
+                "session": asdict(snap),
+            })
+
+        @app.post("/api/bot/start")
+        async def bot_start(req: StartBotRequest) -> JSONResponse:
+            if self._controller is None:
+                raise HTTPException(503, "bot controller not configured")
+            if self._controller.is_running():
+                raise HTTPException(409, "bot already running")
+            params = BotRunParams(
+                symbols=req.symbols, leverage=req.leverage,
+                risk_per_trade_usd=req.risk_per_trade_usd,
+                equity_usd=req.equity_usd, mode=req.mode,
+                score_threshold_override=req.score_threshold_override,
+            )
+            self._stats.reset()
+            status = self._controller.start(params)
+            return JSONResponse(asdict(status))
+
+        @app.post("/api/bot/stop")
+        async def bot_stop() -> JSONResponse:
+            if self._controller is None:
+                raise HTTPException(503, "bot controller not configured")
+            status = self._controller.stop()
+            return JSONResponse(asdict(status))
 
         @app.websocket("/ws/events")
         async def ws_events(ws: WebSocket) -> None:
@@ -132,9 +199,11 @@ class DashboardServer:
             await ws.send_text(json.dumps({"type": "event", "event": event}))
 
 
-def create_app(config: DashboardConfig) -> FastAPI:
-    """Фабрика для uvicorn (--factory)."""
-    server = DashboardServer(config)
+def create_app(
+    config: DashboardConfig, controller: BotController | None = None,
+) -> FastAPI:
+    """Фабрика для uvicorn. Якщо controller=None — UI буде read-only."""
+    server = DashboardServer(config, controller=controller)
     return server.build_app()
 
 

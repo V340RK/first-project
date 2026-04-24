@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V340RK — Scalper</title>
+    <link rel="stylesheet" href="/static/trader.css">
+</head>
+<body>
+    <div class="panel">
+        <header class="header">
+            <div class="title">V340RK</div>
+            <div class="sub">scalper control panel</div>
+        </header>
+
+        <section class="card">
+            <label class="label">Пари (можна кілька):</label>
+            <div class="pair-row">
+                <input type="text" id="pair-input" placeholder="BTCUSDT, ETHUSDT, SOLUSDT…" />
+                <div class="hint">через кому. Регістр не важливий.</div>
+            </div>
+        </section>
+
+        <section class="card two-col">
+            <div>
+                <label class="label" for="leverage">Плече: <span id="leverage-val">5x</span></label>
+                <input type="range" id="leverage" min="1" max="20" value="5" />
+                <div class="hint">x1 — x125 на Binance. Вище 20 — обережно.</div>
+            </div>
+            <div>
+                <label class="label" for="risk">Ризик на угоду (USDT):</label>
+                <input type="number" id="risk" min="0.01" step="0.01" value="0.50" />
+                <div class="hint">скільки максимум втратите на одному SL.</div>
+            </div>
+        </section>
+
+        <section class="card two-col">
+            <div>
+                <label class="label" for="equity">Баланс акаунту (USDT):</label>
+                <input type="number" id="equity" min="1" step="1" value="100" />
+            </div>
+            <div>
+                <label class="label" for="mode">Режим:</label>
+                <select id="mode">
+                    <option value="paper">paper (без реальних ордерів)</option>
+                    <option value="live" selected>live (реальні ордери)</option>
+                </select>
+            </div>
+        </section>
+
+        <section class="card actions">
+            <button id="start-btn" class="btn btn-primary">▶ START BOT</button>
+            <button id="stop-btn" class="btn btn-danger" disabled>⏸ STOP</button>
+            <div id="bot-state" class="pill pill-stopped">stopped</div>
+        </section>
+
+        <section class="card stats">
+            <h2>Статистика сесії</h2>
+            <div class="stat-grid">
+                <div class="stat">
+                    <div class="stat-label">Угод</div>
+                    <div class="stat-value" id="stat-trades">—</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">Час роботи</div>
+                    <div class="stat-value" id="stat-uptime">—</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">ПНЛ (R)</div>
+                    <div class="stat-value" id="stat-r">—</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">ПНЛ (USDT)</div>
+                    <div class="stat-value" id="stat-usd">—</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">Відкрито</div>
+                    <div class="stat-value" id="stat-open">—</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">Остання подія</div>
+                    <div class="stat-value" id="stat-last">—</div>
+                </div>
+            </div>
+        </section>
+
+        <div id="error-banner" class="error-banner hidden"></div>
+
+        <footer class="footer">
+            <a href="/">→ технічний дашборд (усі події журналу)</a>
+        </footer>
+    </div>
+
+    <script src="/static/trader.js"></script>
+</body>
+</html>

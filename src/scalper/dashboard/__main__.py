@@ -12,17 +12,23 @@ from pathlib import Path
 import uvicorn
 
 from scalper.dashboard.config import DashboardConfig
+from scalper.dashboard.controller import BotController
 from scalper.dashboard.server import create_app
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="scalper.dashboard")
-    parser.add_argument("--journal-dir", type=Path, required=True, help="Каталог із JSONL журналами")
+    parser.add_argument("--journal-dir", type=Path, default=Path("journal"),
+                        help="Каталог із JSONL журналами (за замовчанням ./journal)")
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--poll-interval-ms", type=int, default=150)
     parser.add_argument("--backfill-lines", type=int, default=200)
     parser.add_argument("--log-level", type=str, default="info")
+    parser.add_argument("--runtime-config", type=Path, default=Path("configs/runtime.yaml"),
+                        help="Куди писати runtime config для запусків з UI")
+    parser.add_argument("--no-controller", action="store_true",
+                        help="Read-only режим — UI без кнопок старт/стоп")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -39,7 +45,14 @@ def main() -> None:
     )
     config.journal_dir.mkdir(parents=True, exist_ok=True)
 
-    app = create_app(config)
+    controller = None
+    if not args.no_controller:
+        controller = BotController(
+            project_root=Path.cwd(),
+            runtime_config_path=args.runtime_config,
+        )
+
+    app = create_app(config, controller=controller)
     uvicorn.run(app, host=config.host, port=config.port, log_level=args.log_level.lower())
 
 
