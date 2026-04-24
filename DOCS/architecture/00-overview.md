@@ -155,6 +155,8 @@ Replay — це не окрема симуляція, а **той самий pip
 | 11 | Journal / Logger | Infra | [11-journal-logger.md](./11-journal-logger.md) |
 | 12 | Replay / Simulator | Infra | [12-replay-simulator.md](./12-replay-simulator.md) |
 | 13 | Expectancy Tracker | Infra | [13-expectancy-tracker.md](./13-expectancy-tracker.md) |
+| 14 | Orchestrator (крос-cutting) | Runtime glue | [14-orchestrator.md](./14-orchestrator.md) |
+| 15 | NotificationService (крос-cutting) | Infra | [15-notifications.md](./15-notifications.md) |
 
 ---
 
@@ -313,67 +315,10 @@ class OpenPosition: ...               # те що моніторить Position 
 
 ## Крос-cutting сервіси
 
-Два сервіси, які використовуються з більшості модулів, але самі не належать до 12-шарового pipeline.
-Їх окремі docs ще не створені — специфікація нижче замінює їх до першого рефактору.
+Два сервіси, які використовуються з більшості модулів, але самі не належать до 13-шарового pipeline:
 
-### NotificationService
-
-**Відповідальність:** єдина точка для алертів (Telegram/email/stdout). Жоден модуль не шле повідомлення напряму.
-
-**API:**
-
-```python
-class AlertLevel(Enum):
-    INFO = "info"           # звичайні події (позиція відкрита, TP1 зафіксовано)
-    WARNING = "warning"     # reconnect, retry, degrade (не блокує торгівлю)
-    ERROR = "error"         # reject order, часткова поломка (без kill)
-    CRITICAL = "critical"   # kill switch, інварант порушено, ручне втручання потрібне
-
-class NotificationService:
-    async def send(self, text: str, level: AlertLevel) -> None:
-        """Fire-and-forget. Помилка доставки — лог + WARNING у журнал.
-        НЕ повинен блокувати hot loop: rate-limit + async queue всередині."""
-```
-
-**Хто використовує:** RiskEngine (kill switch), ExecutionEngine (reject/retry exhausted),
-PositionManager (STOP_MOVED/закриття), MarketRegime (DISABLED), ExpectancyTracker (SUSPENDED),
-Orchestrator (STARTUP/SHUTDOWN/reconnect).
-
-### Orchestrator / Pipeline
-
-**Відповідальність:** склеює модулі в runtime-граф. Єдиний компонент, який знає про всіх інших.
-
-**Що робить:**
-1. Під час `start()`: піднімає Gateway → OrderBookEngine → TapeFlowAnalyzer → FeatureEngine →
-   MarketRegime → SetupDetector → DecisionEngine → RiskEngine → ExecutionEngine → PositionManager.
-2. **Будує `MarketSnapshot`** на кожен тік (агрегує output-и OrderBook/TapeFlow/FeatureEngine).
-3. Викликає SetupDetector, отримує кандидатів, логує `SETUP_CANDIDATE_GENERATED` у Journal
-   (SetupDetector залишається чистою функцією без I/O).
-4. Пропускає кандидатів через DecisionEngine → RiskEngine → ExecutionEngine.
-5. Обробляє lifecycle-події: kill switch, регіме-зміни, reconnect, graceful shutdown.
-6. **Двопетельний scheduler:** hot loop (on-tick) vs slow loop (1s — регіме/expectancy/heartbeat).
-
-**Що НЕ робить:**
-- Не приймає торгових рішень (делегує DecisionEngine).
-- Не обраховує фічі (делегує FeatureEngine).
-- Не зберігає бізнес-стан (тільки runtime-refs на модулі).
-
-**API (скелет):**
-
-```python
-class Orchestrator:
-    def __init__(self, config: AppConfig, gateway: MarketDataGateway,
-                 book: OrderBookEngine, tape: TapeFlowAnalyzer, features: FeatureEngine,
-                 regime: MarketRegime, detector: SetupDetector, decision: DecisionEngine,
-                 risk: RiskEngine, execution: ExecutionEngine, position: PositionManager,
-                 journal: JournalLogger, notifier: NotificationService):
-        ...
-
-    async def start(self, symbols: list[str]) -> None
-    async def stop(self) -> None
-    async def on_tick(self, symbol: str, event_time_ms: int) -> None    # hot loop
-    async def on_slow_tick(self) -> None                                # регіме/expectancy/heartbeat
-```
+- **Orchestrator** — runtime-граф, що склеює модулі й веде hot/slow loop. Деталі — [14-orchestrator.md](./14-orchestrator.md).
+- **NotificationService** — єдина точка вихідних алертів (stdout/Telegram/email). Деталі — [15-notifications.md](./15-notifications.md).
 
 ---
 
