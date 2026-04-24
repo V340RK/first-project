@@ -4,6 +4,7 @@
 Див. DOCS/architecture/00-overview.md, секція 'NotificationService'.
 """
 
+from scalper.notifications.config import NotificationConfig
 from scalper.notifications.service import NotificationService
 
-__all__ = ["NotificationService"]
+__all__ = ["NotificationConfig", "NotificationService"]

@@ -8,6 +8,7 @@ position. Повільний тик `on_slow_tick` — регласифікац�
 
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
@@ -87,29 +88,47 @@ class Orchestrator:
     def _wire_callbacks(self) -> None:
         self._gateway.on_user_event(self._on_user_event)
         self._regime.on_regime_change(self._on_regime_change)
+        # Hot-loop triggering: кожен aggTrade піднімає on_tick для відповідного символу.
+        # Це природна частота — кожен ринковий ухід призводить до перевірки сетапів.
+        self._gateway.on_agg_trade(self._on_agg_trade_tick)
+
+    async def _on_agg_trade_tick(self, trade: Any) -> None:
+        if not self._running:
+            return
+        symbol = getattr(trade, "symbol", None)
+        ts_ms = getattr(trade, "timestamp_ms", None)
+        if symbol is None or ts_ms is None:
+            return
+        try:
+            await self.on_tick(symbol, ts_ms)
+        except Exception as e:
+            logger.exception("on_tick(%s) exception: %s", symbol, e)
 
     async def _on_user_event(self, event: Any) -> None:
         payload = event.payload if hasattr(event, "payload") else event
         await self._execution.handle_user_event(payload)
 
-    async def _on_regime_change(self, symbol: str, old_regime: Any, new_regime: Any) -> None:
-        self._log(EventKind.REGIME_CHANGED, symbol=symbol, payload={
-            "old": getattr(old_regime, "value", str(old_regime)),
-            "new": getattr(new_regime, "value", str(new_regime)),
+    async def _on_regime_change(self, change: Any) -> None:
+        self._log(EventKind.REGIME_CHANGED, symbol=change.symbol, payload={
+            "from": getattr(change.from_regime, "value", str(change.from_regime)),
+            "to": getattr(change.to_regime, "value", str(change.to_regime)),
+            "timestamp_ms": change.timestamp_ms,
         })
 
     # === Lifecycle ===
 
     async def start(self, symbols: list[str]) -> None:
         self._symbols = list(symbols)
-        self._journal.start()
-        self._notifier.start()
+        await _maybe_await(self._journal.start())
+        await _maybe_await(self._notifier.start())
+        # Gateway стартує ПЕРШИМ — щоб WS вже стрімив події на момент,
+        # коли Book/Tape починають warmup і чекають перший depth-diff.
+        await _maybe_await(self._gateway.start(symbols))
         if self._book is not None:
-            self._book.start(symbols)
+            await _maybe_await(self._book.start(symbols))
         if self._tape is not None:
-            self._tape.start(symbols)
-        await self._gateway.start(symbols)
-        self._regime.start(symbols)
+            await _maybe_await(self._tape.start(symbols))
+        await _maybe_await(self._regime.start(symbols))
         for sym in symbols:
             self._regime.reclassify(sym)
         self._running = True
@@ -118,21 +137,21 @@ class Orchestrator:
     async def stop(self) -> None:
         self._running = False
         for pos in list(self._position.all_open()):
-            self._position.force_close(pos.plan.symbol, "shutdown")
+            await _maybe_await(self._position.force_close(pos.plan.symbol, "shutdown"))
         for sym in self._symbols:
             try:
                 await self._execution.cancel_all(sym)
             except Exception as e:
                 logger.warning("cancel_all failed for %s: %s", sym, e)
-        self._regime.stop()
+        await _maybe_await(self._regime.stop())
         if self._tape is not None:
-            self._tape.stop()
+            await _maybe_await(self._tape.stop())
         if self._book is not None:
-            self._book.stop()
-        await self._gateway.stop()
+            await _maybe_await(self._book.stop())
+        await _maybe_await(self._gateway.stop())
         self._log(EventKind.SHUTDOWN, payload={})
-        self._notifier.stop()
-        self._journal.stop()
+        await _maybe_await(self._notifier.stop())
+        await _maybe_await(self._journal.stop())
 
     # === Hot loop ===
 
@@ -147,7 +166,7 @@ class Orchestrator:
         await self._run_pipeline(symbol, features)
 
     async def _run_pipeline(self, symbol: str, features: Features) -> None:
-        self._position.on_features(features)
+        await _maybe_await(self._position.on_features(features))
 
         if self._position.has_open_position(symbol):
             return
@@ -253,6 +272,15 @@ class Orchestrator:
             trade_id=trade_id, symbol=symbol, payload=payload,
         )
         self._journal.log(event)
+
+
+async def _maybe_await(result: Any) -> Any:
+    """Dispatch: awaitable → await; інакше повертає як є. Дозволяє ж модулям
+    лишатися sync або бути async — Orchestrator сумісний з обома варіантами.
+    """
+    if inspect.isawaitable(result):
+        return await result
+    return result
 
 
 __all__ = ["Orchestrator"]

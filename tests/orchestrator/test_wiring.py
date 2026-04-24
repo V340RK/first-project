@@ -29,9 +29,13 @@ from scalper.risk.engine import RiskDecision
 @dataclass
 class FakeGateway:
     user_cbs: list = field(default_factory=list)
+    trade_cbs: list = field(default_factory=list)
 
     def on_user_event(self, cb) -> None:   # type: ignore[no-untyped-def]
         self.user_cbs.append(cb)
+
+    def on_agg_trade(self, cb) -> None:   # type: ignore[no-untyped-def]
+        self.trade_cbs.append(cb)
 
     async def start(self, symbols):   # type: ignore[no-untyped-def]
         self.started_symbols = symbols

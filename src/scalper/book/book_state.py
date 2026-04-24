@@ -47,6 +47,10 @@ class _BookState:
             )
         self._apply_unchecked(diff)
 
+    def apply_diff_relaxed(self, diff: RawDepthDiff) -> None:
+        """Приймає diff без перевірки sequence — для relaxed_sync на testnet."""
+        self._apply_unchecked(diff)
+
     def apply_warmup_diff(self, diff: RawDepthDiff, snap_last_id: int) -> bool:
         """Тих що йдуть ПІД ЧАС ініціалізації (після REST-snapshot-у).
 

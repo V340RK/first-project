@@ -174,10 +174,21 @@ class OrderBookEngine:
 
         # 3. Replay буферу з перевірками sequence.
         snap_last = snap.last_update_id
-        for diff in list(ctx.warmup_buffer):
-            try:
+        try:
+            for diff in list(ctx.warmup_buffer):
                 ctx.book.apply_warmup_diff(diff, snap_last)
-            except SequenceGapError:
+        except SequenceGapError:
+            if self._config.reinit.relaxed_sync:
+                # Testnet / дрифтанутий snapshot: беремо поточний snapshot як
+                # good-enough state, скидаємо buffered diffs і приймаємо лише
+                # свіжі, у яких u > snap.U. Коротка початкова розсинхронізація
+                # допустима (≤ секунди).
+                logger.warning(
+                    "%s: relaxed_sync — snapshot застарілий, приймаємо book з "
+                    "snapshot + live diffs з u > %d", ctx.symbol, snap_last,
+                )
+                ctx.book.last_update_id = snap_last
+            else:
                 raise
         ctx.warmup_buffer.clear()
         ctx.book.initialized = True
@@ -201,9 +212,17 @@ class OrderBookEngine:
         if not ctx.book.initialized:
             ctx.warmup_buffer.append(diff)
             return
+        # У relaxed mode: skip diffs що вже в snapshot, а SequenceGapError
+        # трактуємо як одноразовий resync (для testnet).
+        if self._config.reinit.relaxed_sync and diff.final_update_id <= ctx.book.last_update_id:
+            return
         try:
             ctx.book.apply_diff(diff)
         except SequenceGapError as e:
+            if self._config.reinit.relaxed_sync:
+                logger.debug("%s: relaxed resync on gap: %s", diff.symbol, e)
+                ctx.book.apply_diff_relaxed(diff)
+                return
             logger.error("Sequence gap on %s: %s — scheduling reinit", diff.symbol, e)
             ctx.book.initialized = False
             await self._schedule_reinit(diff.symbol)

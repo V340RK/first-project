@@ -15,6 +15,15 @@ class OBReinitConfig(BaseModel):
     max_attempts: int = Field(default=3, ge=1)
     backoff_ms: int = Field(default=500, ge=50)
     warmup_diff_timeout_ms: int = Field(default=5000, ge=500)
+    relaxed_sync: bool = Field(
+        default=False,
+        description=(
+            "True → якщо строгий Binance-протокол не сходиться (testnet часто "
+            "повертає застарілий snapshot), ініціалізувати book по snapshot і "
+            "далі приймати diffs з поточного потоку, пропускаючи ті що <= snap.U. "
+            "Допустимо невелика короткочасна розсинхронізація."
+        ),
+    )
 
 
 class OBConfig(BaseModel):
