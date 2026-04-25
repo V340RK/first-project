@@ -308,6 +308,37 @@ APEUSDT:   0 setup_candidate                       ← це ринок, тонк
 
 **TODO для майбутнього:** auto-scale per-symbol на основі `quoteVolume`/`tradeCount` з `/fapi/v1/ticker/24hr` — щоб scaling був relativeний до реальної ліквідності пари, не до global testnet flag.
 
+### Бот «торгує в мінус» але PnL=0 (#23)
+
+Користувач: «бот торгує тільки на BTC і весь час в мінус».
+
+Журнал показав парадокс:
+```
+Close reasons: 2× signal_invalidated:price_beyond_level + 2× emergency_close
+Trade outcomes: realized_r=+0.000 (всі 4!), але max_adverse_r=-6.13R
+```
+
+Бот реально втратив **6R** на двох trade-ах, а realized_r записаний 0.00 → SessionStats / RiskEngine / ExpectancyTracker НЕ знали про це. UI показував «+0.00 USDT» а на біржі гроші зникали.
+
+Корінь — два дзеркальних бага у close paths:
+
+1. **`_close_fully`**: `if close_res.success and close_res.status == "FILLED"`. Live MARKET reduce_only повертає `status=NEW` (fill приходить через user-stream WS пізніше). Той самий patern що #18a, але для exit. → Якщо умова не виконана — `realized_r += 0`.
+2. **`_emergency_market_close`**: взагалі **не читав** response від `place_order`. Просто кидав MARKET ордер у пустоту і викликав `_finalize` з `pos.realized_r=0`. Ніколи не рахував loss.
+
+Фікс:
+- `_close_fully`: тригер на `filled_qty > 0` (не status). Якщо немає confirmation — fallback оцінка через `pos.max_adverse_r` (worst-case-known loss).
+- `_emergency_market_close`: читає `close_res.filled_qty` + `avg_fill_price` і додає R. Fallback на MAE або −1.0R якщо немає даних.
+
+Тепер реальні втрати:
+- видно в UI (`trades_closed`, `realized_r`, `realized_usd`)
+- RiskEngine рахує `daily_R` → `daily_loss_limit` спрацьовує
+- ExpectancyTracker auto-suspend збиткові setup_type'и через Wilson CI
+- Loss streak counter не поламаний
+
+Tests +3 (`tests/position/test_close_records_pnl.py`).
+
+**Стратегічний caveat:** окрім хибної бухгалтерії, реальна стратегія робить багато false-start trades що закриваються на `signal_invalidated` до TP. Це нормальний scalping risk profile — багато small losses, рідкі big wins. Калібрується через вищий `score_threshold` і ExpectancyTracker auto-suspend.
+
 ---
 
 ## Що лишилось до prod

@@ -497,21 +497,54 @@ class PositionManager:
                 qty=pos.remaining_qty, reduce_only=True,
             )
             close_res = await self._execution.place_order(close_req)
-            if close_res.success and close_res.status == "FILLED" and close_res.avg_fill_price:
-                r = self._compute_realized_r(pos, close_res.avg_fill_price, pos.remaining_qty)
+            # Trust filled_qty>0 не status (live MARKET reduce_only повертає
+            # NEW, fill приходить через user-stream WS який мовчить — якби
+            # перевіряли status==FILLED, реальний loss не залічувався б у R).
+            if close_res.success and close_res.filled_qty > 0:
+                exit_price = close_res.avg_fill_price or pos.plan.entry_price
+                r = self._compute_realized_r(pos, exit_price, close_res.filled_qty)
+                pos.realized_r += r
+                pos.remaining_qty -= close_res.filled_qty
+            else:
+                # Fallback оцінка: використовуємо last_known price з MAE/MFE
+                # розрахунку (current price з on_features). Інакше R=0 ховає loss.
+                est_exit = pos.plan.entry_price + (
+                    pos.max_adverse_r * (pos.plan.entry_price - pos.plan.stop_price)
+                    if pos.direction == Direction.LONG else
+                    -pos.max_adverse_r * (pos.plan.stop_price - pos.plan.entry_price)
+                )
+                r = self._compute_realized_r(pos, est_exit, pos.remaining_qty)
                 pos.realized_r += r
                 pos.remaining_qty = 0
+                logger.warning(
+                    "%s: close_fully fill not confirmed — estimated R=%.2f from MAE",
+                    pos.symbol, r,
+                )
 
         await self._finalize(pos, was_stopped=was_stopped, reason=reason)
 
     async def _emergency_market_close(self, pos: OpenPosition) -> None:
         await self._execution.cancel_all(pos.symbol)
-        side = OrderSide.SELL if pos.direction == Direction.LONG else OrderSide.BUY
         if pos.filled_qty > 0:
-            await self._execution.place_order(OrderRequest(
+            side = OrderSide.SELL if pos.direction == Direction.LONG else OrderSide.BUY
+            close_res = await self._execution.place_order(OrderRequest(
                 symbol=pos.symbol, side=side, type=OrderType.MARKET,
                 qty=pos.filled_qty, reduce_only=True,
             ))
+            # CRITICAL: emergency раніше не рахував realized_r — позиція
+            # закривалась тихо з R=0, ховаючи реальний loss від Risk/Expectancy.
+            if close_res.success and close_res.filled_qty > 0 and close_res.avg_fill_price:
+                r = self._compute_realized_r(pos, close_res.avg_fill_price, close_res.filled_qty)
+                pos.realized_r += r
+                pos.remaining_qty = max(0, pos.remaining_qty - close_res.filled_qty)
+            else:
+                # Fallback від MAE — це консервативна оцінка втрати.
+                est_loss_r = pos.max_adverse_r if pos.max_adverse_r < 0 else -1.0
+                pos.realized_r += est_loss_r
+                logger.warning(
+                    "%s: emergency_close fill not confirmed — using MAE %.2fR as estimate",
+                    pos.symbol, est_loss_r,
+                )
         await self._finalize(pos, was_stopped=False, reason="emergency_close")
 
     async def _finalize(
