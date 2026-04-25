@@ -132,7 +132,49 @@ def load_config(
         notif_raw.setdefault("telegram_chat_id", tg_chat)
     raw["notifications"] = notif_raw
 
-    return AppConfig.model_validate(raw)
+    cfg = AppConfig.model_validate(raw)
+
+    # Testnet/thin-pair: усі USD-thresholds detector-а калібровані під BTC
+    # spot ($50k-$150k bursts, $30k absorption). На дрібних альтах ці пороги
+    # недосяжні → 0 setup_candidate. Знижуємо в 10× для testnet.
+    if testnet:
+        # /20 — bo на testnet кожна угода ~$1-100, не $50k як на BTC mainnet.
+        # Treba aggressive scaling, інакше setup_detector мовчить на дрібних
+        # альтах (HYPER, AXS, D і подібних).
+        _scale_usd_thresholds(cfg, scale=0.05)
+        import logging
+        logging.getLogger(__name__).info(
+            "testnet auto-scale: USD thresholds /20 (burst_2s=%.0f, absorption_min=%.0f)",
+            cfg.features.burst.threshold_usd_2s,
+            cfg.setups.absorption.min_pressure_usd,
+        )
+
+    return cfg
+
+
+def _scale_usd_thresholds(cfg: AppConfig, scale: float) -> None:
+    """Зменшує всі USD-base thresholds детектора на множник. Детально див.
+    DOCS/14-journey.md секція "USD thresholds на дрібних парах". Працює на місці
+    (pydantic models mutable за дефолтом)."""
+    f = cfg.features
+    f.burst.threshold_usd_500ms = f.burst.threshold_usd_500ms * scale
+    f.burst.threshold_usd_2s = f.burst.threshold_usd_2s * scale
+    f.absorption.delta_threshold_usd = f.absorption.delta_threshold_usd * scale
+    f.absorption.full_score_delta_usd = f.absorption.full_score_delta_usd * scale
+    f.spoof.min_size_usd = f.spoof.min_size_usd * scale
+    f.micro_pullback.weak_counter_delta_usd = f.micro_pullback.weak_counter_delta_usd * scale
+
+    s = cfg.setups
+    s.absorption.min_pressure_usd = s.absorption.min_pressure_usd * scale
+    s.absorption.confirm_recovery_delta = s.absorption.confirm_recovery_delta * scale
+    s.absorption.invalidation_counter_delta = s.absorption.invalidation_counter_delta * scale
+    s.imbalance_cont.min_buy_pressure_usd = s.imbalance_cont.min_buy_pressure_usd * scale
+    s.imbalance_cont.opposing_delta_usd = s.imbalance_cont.opposing_delta_usd * scale
+    s.spoof.confirm_pressure_usd = s.spoof.confirm_pressure_usd * scale
+    s.spoof.invalidation_counter_delta = s.spoof.invalidation_counter_delta * scale
+    s.micro_pullback.max_counter_delta_usd = s.micro_pullback.max_counter_delta_usd * scale
+
+    cfg.decision.delta_magnitude_full_score_usd = cfg.decision.delta_magnitude_full_score_usd * scale
 
 
 __all__ = ["AppConfig", "load_config"]

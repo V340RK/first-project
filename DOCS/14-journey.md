@@ -294,6 +294,20 @@ APEUSDT:   0 setup_candidate                       ← це ринок, тонк
 
 **Layout slot-card** змінився з 1-колонки на 2-колоночний `.slot-body` (config 1fr + book 240px). На мобільному (< 720px) знов 1 колонка.
 
+> **Update 2026-04-25:** Прибрано з UI на запит користувача — backend service та endpoint лишилися (нульовий runtime cost), якщо колись захочемо повернути візуалізацію — потрібен лише фронтенд.
+
+### USD thresholds на дрібних парах (#22)
+
+Користувач: «Угоди тільки на BTC. На решті парах ціна ходить ±% за хвилину, бот би мав ловити рухи».
+
+Журнал показав: BTC дав 13 setup_candidate за сесію, **дрібні альти (HYPER/AXS/D) — 0**. SetupDetector взагалі не випускав кандидатів. Перевірка показала що дані WS приходять (28/15/13 trades за 10с відповідно), але **USD-thresholds детекторів калібровані під BTC-volume** — `burst.threshold_usd_2s=150_000`, `absorption.min_pressure_usd=30_000`. На альтах де trade size $1-50, ці пороги недосяжні.
+
+Фікс: у `loader.py` додано `_scale_usd_thresholds(cfg, scale)` що множить усі `*_usd` поля в `features` (burst/absorption/spoof/micro_pullback) і `setups` (absorption/imbalance_cont/spoof/micro_pullback) + `decision.delta_magnitude_full_score_usd` на множник. Якщо `BINANCE_TESTNET=true` → автоматично scale=0.05 (×20 reduction).
+
+**Поточний стан testnet:** навіть з ×20 reduction — на дрібних альтах activity недостатня для тригеру setup-ів. Це **обмеження testnet** (volume крихітний), не баг бота. На проді з нормальним BTC/ETH/SOL volume — стратегія має працювати правильно.
+
+**TODO для майбутнього:** auto-scale per-symbol на основі `quoteVolume`/`tradeCount` з `/fapi/v1/ticker/24hr` — щоб scaling був relativeний до реальної ліквідності пари, не до global testnet flag.
+
 ---
 
 ## Що лишилось до prod
