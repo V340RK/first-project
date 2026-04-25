@@ -18,6 +18,13 @@ class RiskConfig(BaseModel):
     leverage: int = Field(default=5, ge=1, le=125)
     max_notional_usage: float = Field(default=0.9, gt=0, le=1.0)
 
+    # === Stop-loss override (fixed % від entry) ===
+    # Якщо встановлено — RiskEngine перепише plan.stop_price на
+    # entry × (1 ± pct/100), а TP1/TP2/TP3 — на 1R/2R/3R від нового stop.
+    # Це прозоре, передбачуване правило ризику замість structure-based stops
+    # від setup-detector. Користувач знає: «упаде на 2% → SL спрацює».
+    stop_loss_pct: float | None = Field(default=None, gt=0, le=50)
+
     # === Margin-based sizing (альтернативний режим) ===
     # Якщо встановлено — RiskEngine ігнорує R-based formula (risk/stop_distance)
     # і використовує fixed-margin sizing: notional = equity * pct/100 * leverage.

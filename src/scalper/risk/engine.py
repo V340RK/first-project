@@ -157,6 +157,27 @@ class RiskEngine:
         if equity_usd <= 0:
             return RiskDecision(plan=None, reason="equity_unknown", snapshot=snapshot)
 
+        # Override stop-loss до фіксованого % від entry, якщо config задає це.
+        # Прозоре правило: SL спрацює коли ціна піде проти на N% від entry,
+        # незалежно від того, що setup-detector думав про market structure.
+        # TPs перераховуються як 1R/2R/3R від нового stop_distance.
+        if self._config.stop_loss_pct is not None and self._config.stop_loss_pct > 0:
+            pct = self._config.stop_loss_pct / 100.0
+            if plan.direction == Direction.LONG:
+                new_stop = plan.entry_price * (1 - pct)
+                tp1 = plan.entry_price + 1.0 * (plan.entry_price - new_stop)
+                tp2 = plan.entry_price + 2.0 * (plan.entry_price - new_stop)
+                tp3 = plan.entry_price + 3.0 * (plan.entry_price - new_stop)
+            else:
+                new_stop = plan.entry_price * (1 + pct)
+                tp1 = plan.entry_price - 1.0 * (new_stop - plan.entry_price)
+                tp2 = plan.entry_price - 2.0 * (new_stop - plan.entry_price)
+                tp3 = plan.entry_price - 3.0 * (new_stop - plan.entry_price)
+            plan = replace(
+                plan, stop_price=new_stop,
+                tp1_price=tp1, tp2_price=tp2, tp3_price=tp3,
+            )
+
         stop_distance_price = abs(plan.entry_price - plan.stop_price)
         if stop_distance_price <= 0:
             return RiskDecision(plan=None, reason="invalid_stop_distance", snapshot=snapshot)

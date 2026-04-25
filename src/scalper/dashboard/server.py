@@ -52,6 +52,7 @@ class StartBotRequest(BaseModel):
     margin_per_trade_pct: float | None = Field(default=None, ge=0.01, le=100)
     max_book_consumption_pct: float | None = Field(default=None, gt=0, le=100)
     max_expected_slippage_ticks: int | None = Field(default=None, ge=1)
+    stop_loss_pct: float | None = Field(default=None, gt=0, le=50)
     mode: str = "live"
     score_threshold_override: float | None = None
     # equity_usd НЕ приймається ззовні — береться з реального balance API
@@ -263,6 +264,7 @@ class DashboardServer:
                 sizing_mode=sizing_mode,
                 max_book_consumption_pct=req.max_book_consumption_pct,
                 max_expected_slippage_ticks=req.max_expected_slippage_ticks,
+                stop_loss_pct=req.stop_loss_pct,
                 equity_usd=equity_usd, mode=req.mode,
                 score_threshold_override=score_thr,
                 relaxed_regime=testnet,

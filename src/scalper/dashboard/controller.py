@@ -43,6 +43,7 @@ class BotRunParams:
     margin_per_trade_pct: float | None = None   # використовується якщо sizing_mode=margin_pct
     max_book_consumption_pct: float | None = None   # liquidity guard (None = off)
     max_expected_slippage_ticks: int | None = None  # slippage guard (None = off)
+    stop_loss_pct: float | None = None               # fixed % SL від entry (None = structure-based)
 
 
 @dataclass
@@ -183,6 +184,8 @@ class BotController:
             risk_section["max_book_consumption_pct"] = params.max_book_consumption_pct
         if params.max_expected_slippage_ticks is not None:
             risk_section["max_expected_slippage_ticks"] = params.max_expected_slippage_ticks
+        if params.stop_loss_pct is not None:
+            risk_section["stop_loss_pct"] = params.stop_loss_pct
 
         config_dict: dict = {
             "mode": params.mode,
