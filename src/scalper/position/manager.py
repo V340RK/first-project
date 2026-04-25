@@ -90,6 +90,7 @@ class PositionManager:
         self._clock: ClockFn = clock_fn if clock_fn is not None else (lambda: _time.clock())
         self._positions: dict[str, OpenPosition] = {}
         self._close_cbs: list[Callable[[TradeOutcome, str], None]] = []
+        self._open_fail_cbs: list[Callable[[TradePlan, str], None]] = []
 
         execution.on_fill(self._on_fill)
 
@@ -98,6 +99,13 @@ class PositionManager:
     ) -> None:
         """Підписка на закриття позиції. cb(outcome, reason)."""
         self._close_cbs.append(cb)
+
+    def on_open_failed(
+        self, cb: Callable[[TradePlan, str], None],
+    ) -> None:
+        """Підписка на невдалу open() — щоб помилки exchange виходили у журнал,
+        а не зникали в logger.error()."""
+        self._open_fail_cbs.append(cb)
 
     # === Public ===
 
@@ -112,7 +120,12 @@ class PositionManager:
         entry_req = self._build_entry(plan)
         result = await self._execution.place_order(entry_req)
         if not result.success:
-            logger.error("entry order rejected: %s", result.error_msg)
+            reason = result.error_msg or "unknown_reject"
+            logger.error("entry order rejected: %s", reason)
+            for cb in self._open_fail_cbs:
+                try: cb(plan, reason)
+                except Exception as e:
+                    logger.exception("on_open_failed cb crashed: %s", e)
             return False
 
         now = self._clock()

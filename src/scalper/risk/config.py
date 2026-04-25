@@ -11,6 +11,13 @@ class RiskConfig(BaseModel):
     risk_per_trade_pct: float = Field(default=0.003, gt=0)      # 0.3%
     slippage_buffer_ticks: int = Field(default=1, ge=0)
 
+    # === Notional cap ===
+    # Захист від тонких стопів: setup з SL за $0.5 від entry на BTCUSDT @ 78000
+    # дав би qty=4 BTC (notional ~$300k), що перевищує margin навіть з 10x плечем.
+    # Cap = equity * leverage * usage. usage<1 щоб лишити запас на slip/fee.
+    leverage: int = Field(default=5, ge=1, le=125)
+    max_notional_usage: float = Field(default=0.9, gt=0, le=1.0)
+
     # === Size fallbacks (поки немає ExchangeInfo) ===
     fallback_tick_size: float = Field(default=0.1, gt=0)
     fallback_step_size: float = Field(default=0.001, gt=0)

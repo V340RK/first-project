@@ -187,6 +187,19 @@ risk:
 
 **Перший повний цикл:** через **42 секунди** після старту 3-х ботів — `setup_candidate → position_opened → position_closed → trade_outcome` у журналі, UI показав `trades_closed=1` для BTCUSDT.
 
+### Третє коло debug «trades в UI, але порожньо на Binance»
+
+Користувач показав скріншот Binance Futures testnet: `Trade History: You have no trade history`. Виявилося що paper-mode симулює угоди в пам'яті (не шле на біржу) — це by design, але я не зробив це чітким у комунікації. Користувач переключив у LIVE mode → знов 0 угод. Розкопав ще 2 баги:
+
+| # | Симптом | Корінь | Фікс |
+|---|---|---|---|
+| 16 | `risk_accepted qty=3.333 BTC` (notional ≈ $260k!) → Binance: `"Margin is insufficient"` (-2019) → `position.open()` повертала False, без події в журналі | RiskEngine рахував `qty = risk_usd / stop_distance`. Setup з тонким стопом ($0.5 для BTC) дає величезну позицію, що виходить за `equity * leverage` | `RiskConfig.leverage` + `max_notional_usage = 0.9`. У `_compute_size()`: `max_qty_by_notional = (equity*leverage*usage)/price`. `qty = min(qty_by_risk, max_qty_by_notional)`. `__main__.py` копіює `cfg.leverage` → `risk_cfg.leverage` |
+| 17 | Помилки біржі (`-2019`, `-2010`) знаходилися тільки у `logs/bot_{SYMBOL}.log`; журнал нічого не бачив → UI ніяк не сигналізував користувачу | `PositionManager.open()` повертала `False` без сповіщення Orchestrator-а. Тільки `logger.error()` | Доданo callback `PositionManager.on_open_failed(cb)`. Orchestrator підписується і пише `WARNING` подію в журнал з `setup_type/qty/reason`. UI може це показати в майбутньому |
+
+**Підтвердження real-trade:** через **2 секунди** після старту в LIVE mode — позиція 0.116 BTC LONG @ 77596.6 з'явилася у `/fapi/v2/positionRisk` testnet-акаунту. На UI `position_opened` подія, на біржі реальна expozycja з unrealized PnL.
+
+**Залишений блокер #18 (для наступної сесії):** Open Orders на біржі = 0 — SL/TP не виставлені. PositionManager викликає `_place_protection()` тільки коли `result.status == "FILLED"`. Live entry повертається як `NEW` (LIMIT IOC) → бот чекає fill через WebSocket user stream → user stream періодично мовчить (`listenKey expired`, `WS silence on user: 32996ms`) → fill не доставляється → protection не виставляється → позиція висить без SL.
+
 ---
 
 ## Що лишилось до prod

@@ -76,7 +76,10 @@ async def run(cfg: AppConfig) -> None:
     regime = MarketRegime(cfg.regime, book, tape)
     detector = SetupDetector(default_rules(cfg.setups))
     expectancy = ExpectancyTracker(cfg.expectancy)
-    risk = RiskEngine(cfg.risk)
+    # Передаємо плече з AppConfig у RiskEngine, щоб notional cap відповідав
+    # реальному маржинальному обмеженню акаунту.
+    risk_cfg = cfg.risk.model_copy(update={"leverage": cfg.leverage})
+    risk = RiskEngine(risk_cfg)
     position = PositionManager(cfg.position, execution, risk)   # type: ignore[arg-type]
     decision = DecisionEngine(cfg.decision, regime, risk=risk, expectancy=expectancy, position=position)
 

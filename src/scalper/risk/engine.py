@@ -134,6 +134,15 @@ class RiskEngine:
 
         qty, risk_usd = self._compute_size(plan, equity_usd, stop_distance_price)
 
+        # Notional cap: тонкий стоп може дати qty з notional > equity*leverage,
+        # який Binance відкине як "Margin is insufficient". Обмежуємо до
+        # equity * leverage * usage. usage<1 — щоб лишити запас на slip/fee.
+        max_notional = equity_usd * self._config.leverage * self._config.max_notional_usage
+        max_qty_by_notional = max_notional / plan.entry_price
+        if qty > max_qty_by_notional:
+            qty = max_qty_by_notional
+            risk_usd = qty * (stop_distance_price + self._buffer_price())
+
         if qty <= 0:
             return RiskDecision(plan=None, reason="qty_rounded_to_zero", snapshot=snapshot)
         if qty < self._config.fallback_min_qty:

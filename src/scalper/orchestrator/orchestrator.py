@@ -96,6 +96,19 @@ class Orchestrator:
             self._position.on_position_closed(self._on_position_closed)   # type: ignore[attr-defined]
         except AttributeError:
             pass   # FakePosition у деяких тестах не має цього методу
+        # Reject ордера від біржі → у журнал як warning (раніше було тільки в logs/)
+        try:
+            self._position.on_open_failed(self._on_open_failed)   # type: ignore[attr-defined]
+        except AttributeError:
+            pass
+
+    def _on_open_failed(self, plan: Any, reason: str) -> None:
+        self._log(EventKind.WARNING, symbol=plan.symbol, payload={
+            "kind": "order_rejected",
+            "setup_type": plan.setup_type.value,
+            "qty": plan.position_size,
+            "reason": reason,
+        })
 
     def _on_position_closed(self, outcome: Any, reason: str) -> None:
         self._log(EventKind.POSITION_CLOSED, symbol=outcome.symbol, payload={
