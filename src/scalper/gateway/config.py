@@ -14,8 +14,8 @@ class WebSocketConfig(BaseModel):
 
 class RestConfig(BaseModel):
     timeout: int = 10                                # сек на 1 запит
-    max_retries: int = 3
-    retry_delay: int = 1
+    max_retries: int = 6                             # було 3 — testnet WS/REST часто блимають, треба запас
+    retry_delay: int = 1                             # exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s
 
 
 class RateLimitConfig(BaseModel):
