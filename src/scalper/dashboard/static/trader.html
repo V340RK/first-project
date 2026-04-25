@@ -79,6 +79,16 @@
                     <div class="hint sizing-hint">Скільки втратиш якщо стоп спрацює (R-based)</div>
                 </div>
                 <div class="form-row">
+                    <label>Захист ліквідності</label>
+                    <div class="sizing-group">
+                        <input type="number" class="slot-liq-cap" min="1" max="100" step="1"
+                               placeholder="20%" title="max % книжки на топ-5 рівнях" />
+                        <input type="number" class="slot-slip-ticks" min="1" step="1"
+                               placeholder="10 тіків" title="макс. очікуваний slippage" />
+                    </div>
+                    <div class="hint">Тонкі альти можуть з'їсти 80% книжки і зсунути ціну. Залиш порожнім — без обмежень.</div>
+                </div>
+                <div class="form-row">
                     <label>Режим</label>
                     <select class="slot-mode">
                         <option value="paper">paper</option>

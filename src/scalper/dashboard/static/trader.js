@@ -35,6 +35,8 @@
                 leverage: slot.nodes.leverage.value,
                 sizingMode: slot.nodes.sizingMode.value,
                 sizingValue: slot.nodes.sizingValue.value,
+                liqCap: slot.nodes.liqCap.value,
+                slipTicks: slot.nodes.slipTicks.value,
                 mode: slot.nodes.mode.value,
             });
         });
@@ -117,6 +119,8 @@
             sizingMode: card.querySelector(".slot-sizing-mode"),
             sizingValue: card.querySelector(".slot-sizing-value"),
             sizingHint: card.querySelector(".sizing-hint"),
+            liqCap: card.querySelector(".slot-liq-cap"),
+            slipTicks: card.querySelector(".slot-slip-ticks"),
             mode: card.querySelector(".slot-mode"),
             startBtn: card.querySelector(".slot-start"),
             stopBtn: card.querySelector(".slot-stop"),
@@ -134,6 +138,8 @@
             if (prefill.leverage) nodes.leverage.value = prefill.leverage;
             if (prefill.sizingMode) nodes.sizingMode.value = prefill.sizingMode;
             if (prefill.sizingValue) nodes.sizingValue.value = prefill.sizingValue;
+            if (prefill.liqCap) nodes.liqCap.value = prefill.liqCap;
+            if (prefill.slipTicks) nodes.slipTicks.value = prefill.slipTicks;
             if (prefill.mode) nodes.mode.value = prefill.mode;
         }
         nodes.leverageVal.textContent = `${nodes.leverage.value}x`;
@@ -158,7 +164,7 @@
             saveSlots();
         });
         ["change", "input"].forEach(ev => {
-            [nodes.sizingValue, nodes.mode].forEach(n => {
+            [nodes.sizingValue, nodes.liqCap, nodes.slipTicks, nodes.mode].forEach(n => {
                 n.addEventListener(ev, saveSlots);
             });
         });
@@ -207,6 +213,10 @@
             if (!(sizingVal > 0)) { showError(`${sym}: ризик USDT > 0`); return; }
             payload.risk_per_trade_usd = sizingVal;
         }
+        const liqCap = parseFloat(slot.nodes.liqCap.value);
+        if (liqCap > 0 && liqCap <= 100) payload.max_book_consumption_pct = liqCap;
+        const slipTicks = parseInt(slot.nodes.slipTicks.value, 10);
+        if (slipTicks > 0) payload.max_expected_slippage_ticks = slipTicks;
         if (lastBalance && lastBalance.available_balance <= 0) {
             showError(`${sym}: баланс акаунту = 0; пополни перед стартом`);
             return;
@@ -261,7 +271,8 @@
         slot.nodes.stopBtn.disabled = !running;
         slot.nodes.remove.disabled = running;
         // Заборона змінювати конфіг під час роботи (для прозорості)
-        [slot.nodes.leverage, slot.nodes.sizingMode, slot.nodes.sizingValue, slot.nodes.mode]
+        [slot.nodes.leverage, slot.nodes.sizingMode, slot.nodes.sizingValue,
+         slot.nodes.liqCap, slot.nodes.slipTicks, slot.nodes.mode]
             .forEach(n => { n.disabled = running; });
 
         if (session) {

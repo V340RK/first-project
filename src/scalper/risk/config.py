@@ -25,6 +25,21 @@ class RiskConfig(BaseModel):
     # Реальний R-ризик плаваючий — залежить від того, як setup поставив стоп.
     margin_per_trade_pct: float | None = Field(default=None, ge=0, le=100)
 
+    # === Liquidity guards (захист від price impact на тонкій книжці) ===
+    # На пар з малою liquidity (HYPER, дрібні альти) велика позиція з'їдає
+    # 50%+ top-of-book і зсуває ціну на % — entry filled значно гірше plan,
+    # SL/TP не там де ми очікували. Walk the book ПЕРЕД place_order.
+    # OPT-IN: None = guard вимкнено (default для BC). Рекомендовано для
+    # дрібних альтів виставляти значення явно через UI/YAML.
+    max_book_consumption_pct: float | None = Field(default=None, gt=0, le=100)
+    """Не більше N% сумарної якості на top book_depth_levels рівнях."""
+
+    max_expected_slippage_ticks: int | None = Field(default=None, ge=1)
+    """Якщо очікуваний average fill price відхиляється від best by > N ticks → reject."""
+
+    book_depth_levels: int = Field(default=5, ge=1, le=20)
+    """Скільки рівнів книжки враховувати для walk."""
+
     # === Size fallbacks (поки немає ExchangeInfo) ===
     fallback_tick_size: float = Field(default=0.1, gt=0)
     fallback_step_size: float = Field(default=0.001, gt=0)

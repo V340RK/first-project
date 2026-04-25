@@ -257,6 +257,30 @@ APEUSDT:   0 setup_candidate                       ← це ринок, тонк
 
 Тести: +4 (`test_resolver_overrides_fallback_step_for_low_priced_coin`, `test_resolver_real_min_notional_used_not_fallback`, `test_notional_below_min_rejects_only_when_bump_exceeds_cap`, `test_resolver_failure_falls_back_to_config`).
 
+### Liquidity-aware sizing (#20): walk the book before placing
+
+Користувач: «На різних парах різна ліквідність, десь $5000 зсуває ціну на пару %, десь непомітно. Чи бот враховує?»
+
+Раніше — НЕ враховував. RiskEngine рахував qty з margin/risk + капив notional до `equity*leverage`, але **не знав глибину книжки**. На дрібних альтах позиція могла з'їсти 50%+ top-of-book → entry filled з великим slippage → SL/TP не там де очікували.
+
+Фікс: walk the book у RiskEngine **перед** прийняттям plan'а.
+
+**Конфіг (opt-in, default off для backward compat):**
+- `RiskConfig.max_book_consumption_pct: float | None` — не з'їдай більше N% сумарної якості на топ-N рівнях книжки
+- `RiskConfig.max_expected_slippage_ticks: int | None` — якщо очікуваний avg fill price відхиляється від best > N тіків → reject
+- `RiskConfig.book_depth_levels: int = 5` — скільки рівнів враховувати
+
+**Алгоритм `_book_walk_caps(plan, intended_qty, tick_size)`:**
+1. Береться `book = plan.candidate.features_snapshot.snapshot.book`. Для LONG → walk asks, для SHORT → bids.
+2. `total_qty = sum(top N levels.size)`. Якщо нуль/немає → fallback до notional cap.
+3. `qty_cap = total_qty * max_book_consumption_pct / 100`.
+4. Симуляція fill по top levels для `min(intended_qty, qty_cap)`: накопичуємо notional + filled, виводимо `avg_fill = notional / filled`. `slip_ticks = abs(avg_fill - best_price) / tick_size`.
+5. Якщо `qty > qty_cap` → cap (round до step). Якщо `slip_ticks > max` → reject з `expected_slippage X.X ticks > N (thin book)`.
+
+**UI:** додано 2 опційні поля у slot-картці — `% книжки` та `slip ticks`. Залиш порожнім — guard вимкнено для цієї пари.
+
+**Tests +6** (`tests/risk/test_liquidity_guard.py`): cap qty від thin book, deep book проходить, huge slippage rejected, відсутність book → no crash, SHORT walks bid side, default off.
+
 ---
 
 ## Що лишилось до prod

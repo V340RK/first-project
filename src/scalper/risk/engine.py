@@ -121,12 +121,12 @@ class RiskEngine:
             monthly=_MonthlyAccum(year_month=_utc_month(now)),
         )
 
-    def _filters(self, symbol: str) -> tuple[float, float, float, float]:
-        """Повертає (step_size, min_qty, max_qty, min_notional) для символу.
+    def _filters(self, symbol: str) -> tuple[float, float, float, float, float]:
+        """Повертає (step_size, min_qty, max_qty, min_notional, tick_size) для символу.
         З resolver-а якщо доступно, інакше fallback з RiskConfig."""
         c = self._config
         defaults = (c.fallback_step_size, c.fallback_min_qty,
-                    c.fallback_max_qty, c.fallback_min_notional)
+                    c.fallback_max_qty, c.fallback_min_notional, c.fallback_tick_size)
         if self._filters_resolver is None:
             return defaults
         try:
@@ -140,6 +140,7 @@ class RiskEngine:
             float(getattr(f, "min_qty", defaults[1]) or defaults[1]),
             float(getattr(f, "max_qty", defaults[2]) or defaults[2]),
             float(getattr(f, "min_notional", defaults[3]) or defaults[3]),
+            float(getattr(f, "tick_size", defaults[4]) or defaults[4]),
         )
 
     # === Public API ===
@@ -160,7 +161,7 @@ class RiskEngine:
         if stop_distance_price <= 0:
             return RiskDecision(plan=None, reason="invalid_stop_distance", snapshot=snapshot)
 
-        step, min_qty, max_qty, min_notional = self._filters(plan.symbol)
+        step, min_qty, max_qty, min_notional, tick_size = self._filters(plan.symbol)
         qty, risk_usd = self._compute_size(plan, equity_usd, stop_distance_price, step)
 
         # Notional cap: тонкий стоп може дати qty з notional > equity*leverage,
@@ -171,6 +172,27 @@ class RiskEngine:
         if qty > max_qty_by_notional:
             qty = self._round_step(max_qty_by_notional, step)
             risk_usd = qty * (stop_distance_price + self._buffer_price())
+
+        # Liquidity guard (opt-in): walk the book, обмежимо qty до X% top-N
+        # рівнів і відхилимо позицію якщо очікуваний slippage > N ticks.
+        # Без цього на дрібних альтах позиція з'їдає 80%+ liquidity → entry
+        # filled значно гірше plan → SL/TP не там де очікуємо.
+        if (self._config.max_book_consumption_pct is not None
+                or self._config.max_expected_slippage_ticks is not None):
+            liq_qty_cap, expected_slip_ticks = self._book_walk_caps(plan, qty, tick_size)
+            if (self._config.max_book_consumption_pct is not None
+                    and liq_qty_cap is not None and qty > liq_qty_cap):
+                qty = self._round_step(liq_qty_cap, step)
+                risk_usd = qty * (stop_distance_price + self._buffer_price())
+            if (self._config.max_expected_slippage_ticks is not None
+                    and expected_slip_ticks is not None
+                    and expected_slip_ticks > self._config.max_expected_slippage_ticks):
+                return RiskDecision(
+                    plan=None,
+                    reason=f"expected_slippage {expected_slip_ticks:.1f} ticks > "
+                           f"{self._config.max_expected_slippage_ticks} (thin book)",
+                    snapshot=snapshot,
+                )
 
         if qty <= 0:
             return RiskDecision(plan=None, reason="qty_rounded_to_zero", snapshot=snapshot)
@@ -391,6 +413,54 @@ class RiskEngine:
         import math
         n = math.ceil(qty / step)
         return round(n * step, 12)
+
+    def _book_walk_caps(
+        self, plan: TradePlan, intended_qty: float, tick_size: float,
+    ) -> tuple[float | None, float | None]:
+        """Walk-the-book: обмежує qty до max_book_consumption_pct сумарної
+        liquidity і рахує очікуваний slippage в тіках для actual planned qty.
+
+        Повертає (qty_cap, expected_slippage_ticks). None якщо книжка
+        недоступна — fallback на pre-existing notional cap.
+
+        Direction: для LONG entry йдемо по asks (буємо), для SHORT — по bids.
+        """
+        try:
+            book = plan.candidate.features_snapshot.snapshot.book
+        except AttributeError:
+            return (None, None)
+        from scalper.common.enums import Direction
+        levels = book.asks if plan.direction == Direction.LONG else book.bids
+        depth = self._config.book_depth_levels
+        top = levels[:depth]
+        if not top:
+            return (None, None)
+
+        total_qty = sum(lvl.size for lvl in top)
+        if total_qty <= 0:
+            return (None, None)
+
+        qty_cap = total_qty * (self._config.max_book_consumption_pct or 100) / 100.0
+
+        # Слipage за фактичним планом (capped):
+        sim_qty = min(intended_qty, qty_cap, total_qty)
+        best_price = top[0].price
+        remaining = sim_qty
+        notional = 0.0
+        filled = 0.0
+        for lvl in top:
+            take = min(remaining, lvl.size)
+            notional += take * lvl.price
+            filled += take
+            remaining -= take
+            if remaining <= 0:
+                break
+        if filled <= 0 or tick_size <= 0:
+            return (qty_cap, None)
+        avg_fill = notional / filled
+        slip_ticks = abs(avg_fill - best_price) / tick_size
+
+        return (qty_cap, slip_ticks)
 
     def _is_initiative(self, plan: TradePlan) -> bool:
         if plan.regime == Regime.TRENDING_UP and plan.direction == Direction.SHORT:
