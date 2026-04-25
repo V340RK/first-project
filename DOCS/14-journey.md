@@ -175,6 +175,18 @@ risk:
 
 **Перший живий трейд:** після всіх фіксів — `setup_candidate → decision_accepted (regime: low_liq, relaxed) → risk_accepted (qty=0.123 BTC, risk=$1.99) → position_opened (SHORT @ 77531.6, stop @ 77547.7)` за 90 секунд.
 
+### Друге коло debug «UI показує 0 трейдів попри живі позиції»
+
+Після #8-12 бот таки відкривав позиції (видно у `logs/bot_BTCUSDT.log: closed BTCUSDT: +0.00R`), але `/api/bot/status` повертав `trades_closed=0`. Виявилося ще 3 проблеми:
+
+| # | Симптом | Корінь | Фікс |
+|---|---|---|---|
+| 13 | UI ніколи не показує закриті трейди, хоча PositionManager їх логує | `PositionManager._finalize()` повідомляє `RiskEngine.on_position_closed` і пише в logger, але **не сповіщає Orchestrator**. Тому в журнал не йдуть події `position_closed` / `trade_outcome`. SessionStats читає журнал → бачить 0 | Додано `PositionManager.on_position_closed(cb)` callback hook. Orchestrator підписується у `_wire_callbacks()` і пише обидві події у журнал з `realized_r`, `realized_usd`, `reason`, `was_stopped` |
+| 14 | Score=0.4, threshold=0.4 → reject, хоча `score < threshold` має дати False | Float-precision: `0.39999999999999997 < 0.4 == True`. Сетап «точно по порогу» завжди реджектився | `if score < threshold - 1e-9` |
+| 15 | Користувач без UI-control не міг знизити default `base_score_threshold=1.0`, а scores на testnet 0.2-0.4 | Поле `score_threshold_override` приймалось у POST `/api/bot/start`, але UI не мав control для нього → все ігнорувалось → 100% setups rejected | Dashboard server при `BINANCE_TESTNET=true` авто-ставить `score_threshold_override=0.25` якщо клієнт не задав. Записує у `runtime_{SYMBOL}.yaml: decision.base_score_threshold: 0.25` |
+
+**Перший повний цикл:** через **42 секунди** після старту 3-х ботів — `setup_candidate → position_opened → position_closed → trade_outcome` у журналі, UI показав `trades_closed=1` для BTCUSDT.
+
 ---
 
 ## Що лишилось до prod

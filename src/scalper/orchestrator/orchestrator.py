@@ -91,6 +91,30 @@ class Orchestrator:
         # Hot-loop triggering: кожен aggTrade піднімає on_tick для відповідного символу.
         # Це природна частота — кожен ринковий ухід призводить до перевірки сетапів.
         self._gateway.on_agg_trade(self._on_agg_trade_tick)
+        # Закриття позицій → у журнал. Без цього UI не бачить trades_closed/PnL.
+        try:
+            self._position.on_position_closed(self._on_position_closed)   # type: ignore[attr-defined]
+        except AttributeError:
+            pass   # FakePosition у деяких тестах не має цього методу
+
+    def _on_position_closed(self, outcome: Any, reason: str) -> None:
+        self._log(EventKind.POSITION_CLOSED, symbol=outcome.symbol, payload={
+            "setup_type": outcome.setup_type.value,
+            "direction": outcome.direction.value,
+            "reason": reason,
+            "was_stopped": outcome.was_stopped,
+            "realized_r": outcome.realized_r,
+            "realized_usd": outcome.realized_usd,
+        })
+        self._log(EventKind.TRADE_OUTCOME, symbol=outcome.symbol,
+                  trade_id=outcome.trade_id, payload={
+            "setup_type": outcome.setup_type.value,
+            "realized_r": outcome.realized_r,
+            "realized_usd": outcome.realized_usd,
+            "max_favorable_r": outcome.max_favorable_r,
+            "max_adverse_r": outcome.max_adverse_r,
+            "fees_usd": outcome.fees_usd,
+        })
 
     async def _on_agg_trade_tick(self, trade: Any) -> None:
         if not self._running:

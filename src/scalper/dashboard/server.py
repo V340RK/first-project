@@ -215,14 +215,20 @@ class DashboardServer:
             # реально торгувати тестовими грошима. На проді (testnet=False)
             # сувора фільтрація залишається.
             import os as _os
-            relaxed = _os.environ.get("BINANCE_TESTNET", "true").strip().lower() in ("1", "true", "yes", "on")
+            testnet = _os.environ.get("BINANCE_TESTNET", "true").strip().lower() in ("1", "true", "yes", "on")
+
+            # Auto-low threshold для testnet: scores у тонкому ринку 0.2-0.4,
+            # default 1.0 завжди rejected. Користувач може override з UI пізніше.
+            score_thr = req.score_threshold_override
+            if score_thr is None and testnet:
+                score_thr = 0.25
 
             params = BotRunParams(
                 symbol=sym, leverage=req.leverage,
                 risk_per_trade_usd=req.risk_per_trade_usd,
                 equity_usd=equity_usd, mode=req.mode,
-                score_threshold_override=req.score_threshold_override,
-                relaxed_regime=relaxed,
+                score_threshold_override=score_thr,
+                relaxed_regime=testnet,
             )
             self._stats.reset(sym)
             status = self._registry.start(params)

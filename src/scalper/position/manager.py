@@ -89,8 +89,15 @@ class PositionManager:
         self._risk = risk
         self._clock: ClockFn = clock_fn if clock_fn is not None else (lambda: _time.clock())
         self._positions: dict[str, OpenPosition] = {}
+        self._close_cbs: list[Callable[[TradeOutcome, str], None]] = []
 
         execution.on_fill(self._on_fill)
+
+    def on_position_closed(
+        self, cb: Callable[[TradeOutcome, str], None],
+    ) -> None:
+        """Підписка на закриття позиції. cb(outcome, reason)."""
+        self._close_cbs.append(cb)
 
     # === Public ===
 
@@ -426,6 +433,14 @@ class PositionManager:
             self._risk.on_position_closed(outcome)
         except Exception as e:
             logger.exception("risk.on_position_closed failed: %s", e)
+
+        # Сповіщення Orchestrator-а: треба, щоб події потрапили в журнал
+        # (без цього UI не побачить trades_closed і realized PnL).
+        for cb in self._close_cbs:
+            try:
+                cb(outcome, reason)
+            except Exception as e:
+                logger.exception("position.on_position_closed cb failed: %s", e)
 
         logger.info(
             "closed %s: %+.2fR (%s)", pos.symbol, pos.realized_r, reason,

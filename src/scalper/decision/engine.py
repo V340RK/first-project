@@ -82,7 +82,9 @@ class DecisionEngine:
                 continue
 
             score, threshold, exp_mult = self._score(cand)
-            if score < threshold:
+            # Float epsilon: score=0.39999999999999997 vs threshold=0.4 — інакше
+            # сетап "точно по порогу" реджектиться через дрібну похибку
+            if score < threshold - 1e-9:
                 rejected.append(RejectedCandidate(
                     candidate=cand, reason="score_below_threshold",
                     score=score, score_threshold=threshold,
