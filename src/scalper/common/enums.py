@@ -41,6 +41,7 @@ class SetupType(str, Enum):
     DELTA_SPIKE_REJECTION = "delta_spike_rejection"
     MICRO_PULLBACK_CONTINUATION = "micro_pullback_continuation"
     LIQUIDITY_GRAB = "liquidity_grab"
+    MOMENTUM_BREAKOUT = "momentum_breakout"
 
 
 class AlertLevel(str, Enum):

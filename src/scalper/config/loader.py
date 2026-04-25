@@ -173,6 +173,7 @@ def _scale_usd_thresholds(cfg: AppConfig, scale: float) -> None:
     s.spoof.confirm_pressure_usd = s.spoof.confirm_pressure_usd * scale
     s.spoof.invalidation_counter_delta = s.spoof.invalidation_counter_delta * scale
     s.micro_pullback.max_counter_delta_usd = s.micro_pullback.max_counter_delta_usd * scale
+    s.momentum_breakout.min_delta_usd = s.momentum_breakout.min_delta_usd * scale
 
     cfg.decision.delta_magnitude_full_score_usd = cfg.decision.delta_magnitude_full_score_usd * scale
 

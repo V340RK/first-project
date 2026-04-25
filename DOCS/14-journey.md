@@ -339,6 +339,28 @@ Tests +3 (`tests/position/test_close_records_pnl.py`).
 
 **Стратегічний caveat:** окрім хибної бухгалтерії, реальна стратегія робить багато false-start trades що закриваються на `signal_invalidated` до TP. Це нормальний scalping risk profile — багато small losses, рідкі big wins. Калібрується через вищий `score_threshold` і ExpectancyTracker auto-suspend.
 
+### Новий setup-type: MOMENTUM_BREAKOUT (#24)
+
+Користувач: «Бот торгує тільки на BTC, на інших нічого. Мені треба ловити рухи на волатильних парах».
+
+Існуючі сетапи (absorption_reversal, imbalance_continuation, micro_pullback_continuation) — це **mean-reversion / structure-aware scalping**. Полюють на конкретні patterns: великі absorption події, stacked imbalance levels, micro-pullback after burst. На дрібних альтах (HYPER/D/AXS) ця мікроструктура не виникає достатньо часто — бот мовчить.
+
+Що користувачу потрібно — **trend-following / momentum**: ловити рух коли він уже почався. Додав окремий setup-rule:
+
+| Файл | Що робить |
+|---|---|
+| [`enums.py`](src/scalper/common/enums.py): `SetupType.MOMENTUM_BREAKOUT` | новий тип |
+| [`setups/config.py`](src/scalper/setups/config.py): `MomentumBreakoutRuleConfig` | min_thrust_pct=0.3, lookback_ms=10000, min_delta_usd=5000, stop_atr_mult=1.0, tp=(1, 1.8, 3) |
+| [`setups/rules/momentum_breakout.py`](src/scalper/setups/rules/momentum_breakout.py) | Long: `_price_thrust_pct(price_path, 10s) >= 0.3% AND delta_10s >= +5000` → entry @ last_price + tick, stop @ entry × (1 - thrust × stop_atr_mult). Short — дзеркально |
+| `default_rules()` | додано Long+Short instances |
+| `DecisionConfig.regime_allow_map` | MOMENTUM_BREAKOUT дозволено в **усіх** регімах (це trend-rule, не reversal — повинен працювати скрізь) |
+| `DecisionConfig.time_stop_ms_by_setup` | 10s (швидкий exit якщо рух не продовжується) |
+| `loader.py` | scaling /20 для testnet застосовується і на `momentum_breakout.min_delta_usd` |
+
+**Live verified:** на тонких dust pairs HYPER/D/SOL за 3 хв в paper mode — 100+ candidates на парі, по позиції на кожній парі (HYPER+1, D+1, SOL+1). Цe те, що user і просив — рухи ловляться.
+
+Tests +5 (`tests/setups/test_momentum_breakout.py`): thrust above threshold з buy-delta тригерить LONG; thrust занадто малий або delta негативна — пропуск; SHORT mirror; empty price_path → no candidate.
+
 ---
 
 ## Що лишилось до prod

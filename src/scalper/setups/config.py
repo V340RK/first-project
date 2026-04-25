@@ -44,18 +44,37 @@ class MicroPullbackRuleConfig(BaseModel):
     expiry_ms: int = Field(default=5000, gt=0)
 
 
+class MomentumBreakoutRuleConfig(BaseModel):
+    """Простий momentum-rule: ціна щойно зробила різкий рух, у напрямку
+    delta-bias. На відміну від reversal-сетапів, тут ловимо вже існуючий
+    рух, а не його розворот. Підходить для волатильних альтів."""
+    min_thrust_pct: float = Field(default=0.3, gt=0)
+    """Мінімальний рух ціни за `lookback_ms` у % (наприклад 0.3% за 10с)."""
+    lookback_ms: int = Field(default=10_000, ge=1000)
+    """Вікно для виміру руху (співпадає з window_10s tape data)."""
+    min_delta_usd: float = Field(default=5_000, gt=0)
+    """Мінімальний bias delta_10s в USD у напрямку руху."""
+    stop_atr_mult: float = Field(default=1.0, gt=0)
+    """Stop = entry ± thrust_pct × stop_atr_mult (умовно ATR-based, але через
+    реалізований thrust)."""
+    tp_r_multipliers: tuple[float, float, float] = (1.0, 1.8, 3.0)
+    expiry_ms: int = Field(default=3000, gt=0)
+
+
 class SetupConfig(BaseModel):
     tick_size_default: float = Field(default=0.1, gt=0)
     absorption: AbsorptionRuleConfig = Field(default_factory=AbsorptionRuleConfig)
     imbalance_cont: ImbalanceContRuleConfig = Field(default_factory=ImbalanceContRuleConfig)
     spoof: SpoofRuleConfig = Field(default_factory=SpoofRuleConfig)
     micro_pullback: MicroPullbackRuleConfig = Field(default_factory=MicroPullbackRuleConfig)
+    momentum_breakout: MomentumBreakoutRuleConfig = Field(default_factory=MomentumBreakoutRuleConfig)
 
 
 __all__ = [
     "AbsorptionRuleConfig",
     "ImbalanceContRuleConfig",
     "MicroPullbackRuleConfig",
+    "MomentumBreakoutRuleConfig",
     "SetupConfig",
     "SpoofRuleConfig",
 ]

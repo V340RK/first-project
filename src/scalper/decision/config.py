@@ -62,6 +62,7 @@ class DecisionConfig(BaseModel):
             SetupType.DELTA_SPIKE_REJECTION: 15_000,
             SetupType.MICRO_PULLBACK_CONTINUATION: 20_000,
             SetupType.LIQUIDITY_GRAB: 10_000,
+            SetupType.MOMENTUM_BREAKOUT: 10_000,
         }
     )
 
@@ -71,19 +72,23 @@ class DecisionConfig(BaseModel):
                 SetupType.ABSORPTION_REVERSAL, SetupType.STACKED_IMBALANCE,
                 SetupType.DELTA_SPIKE_REJECTION,
                 SetupType.MICRO_PULLBACK_CONTINUATION, SetupType.LIQUIDITY_GRAB,
+                SetupType.MOMENTUM_BREAKOUT,
             },
             Regime.TRENDING_UP: {
                 SetupType.ABSORPTION_REVERSAL, SetupType.STACKED_IMBALANCE,
                 SetupType.MICRO_PULLBACK_CONTINUATION,
+                SetupType.MOMENTUM_BREAKOUT,
             },
             Regime.TRENDING_DOWN: {
                 SetupType.ABSORPTION_REVERSAL, SetupType.STACKED_IMBALANCE,
                 SetupType.MICRO_PULLBACK_CONTINUATION,
+                SetupType.MOMENTUM_BREAKOUT,
             },
             Regime.CHOPPY: {
                 SetupType.ABSORPTION_REVERSAL, SetupType.DELTA_SPIKE_REJECTION,
+                SetupType.MOMENTUM_BREAKOUT,
             },
-            Regime.HIGH_VOL: {SetupType.ABSORPTION_REVERSAL},
+            Regime.HIGH_VOL: {SetupType.ABSORPTION_REVERSAL, SetupType.MOMENTUM_BREAKOUT},
             Regime.LOW_LIQ: set(),
             Regime.NEWS_RISK: set(),
             Regime.DISABLED: set(),
