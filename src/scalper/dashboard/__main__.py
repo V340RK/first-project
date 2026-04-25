@@ -12,6 +12,7 @@ from pathlib import Path
 import uvicorn
 
 from scalper.dashboard.account import BinanceAccountService
+from scalper.dashboard.book_snapshot import BookSnapshotService
 from scalper.dashboard.config import DashboardConfig
 from scalper.dashboard.controller import BotRegistry
 from scalper.dashboard.server import create_app
@@ -67,6 +68,7 @@ def main() -> None:
         else "https://fapi.binance.com"
     )
     symbol_service = BinanceSymbolService(base_url)
+    book_service = BookSnapshotService(base_url)   # public endpoint, без API key
 
     # AccountService потребує API key/secret + спільний транспорт зі timing sync.
     account_service: BinanceAccountService | None = None
@@ -88,7 +90,7 @@ def main() -> None:
 
     app = create_app(
         config, registry=registry, symbol_service=symbol_service,
-        account_service=account_service,
+        account_service=account_service, book_service=book_service,
     )
     uvicorn.run(app, host=config.host, port=config.port, log_level=args.log_level.lower())
 

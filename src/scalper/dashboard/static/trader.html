@@ -62,6 +62,7 @@
                 <button type="button" class="slot-remove" title="Видалити слот">×</button>
             </header>
 
+            <div class="slot-body">
             <div class="slot-config">
                 <div class="form-row">
                     <label>Плече: <span class="leverage-val">5x</span></label>
@@ -95,6 +96,22 @@
                         <option value="live" selected>live</option>
                     </select>
                 </div>
+            </div>
+
+            </div>
+            <div class="mini-book">
+                <div class="mini-book-spread"><span class="spread-label">spread:</span> <span class="spread-val">—</span></div>
+                <table class="book-table">
+                    <thead><tr><th>ask</th><th class="num">price</th><th class="num">qty</th></tr></thead>
+                    <tbody class="book-asks"></tbody>
+                </table>
+                <div class="book-divider"></div>
+                <table class="book-table">
+                    <tbody class="book-bids"></tbody>
+                    <tfoot><tr><th>bid</th><th class="num">price</th><th class="num">qty</th></tr></tfoot>
+                </table>
+                <div class="hint book-meta">— завантажую…</div>
+            </div>
             </div>
 
             <div class="slot-actions">

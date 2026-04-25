@@ -281,6 +281,19 @@ APEUSDT:   0 setup_candidate                       ← це ринок, тонк
 
 **Tests +6** (`tests/risk/test_liquidity_guard.py`): cap qty від thin book, deep book проходить, huge slippage rejected, відсутність book → no crash, SHORT walks bid side, default off.
 
+### Mini-orderbook у slot-картці (#21)
+
+Користувач: «Можна відобразити стакан біля вибраної пари?» Так — додано міні-стакан як side-panel у кожному slot-card.
+
+| Компонент | Файл |
+|---|---|
+| `BookSnapshotService` | [`dashboard/book_snapshot.py`](src/scalper/dashboard/book_snapshot.py) — REST `/fapi/v1/depth`, public endpoint, кеш TTL 1.5с per-symbol з async lock |
+| Endpoint `GET /api/orderbook/{symbol}?depth=N` | depth 5..20, повертає `{symbol, bids, asks, fetched_at_ms, last_update_id}` |
+| UI: mini-book у slot-card | Top-5 asks (червоні, спадаючи донизу) + top-5 bids (зелені), bar-background пропорційно qty (max в кожному snapshot = 100% width); spread у заголовку (price + %) |
+| JS polling 2с per-slot | `setInterval(fetchBook(sym), 2000)`, очищується при `removeSlot` |
+
+**Layout slot-card** змінився з 1-колонки на 2-колоночний `.slot-body` (config 1fr + book 240px). На мобільному (< 720px) знов 1 колонка.
+
 ---
 
 ## Що лишилось до prod

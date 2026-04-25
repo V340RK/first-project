@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 
 from scalper.common import time as _time
 from scalper.dashboard.account import BinanceAccountService
+from scalper.dashboard.book_snapshot import BookSnapshotService
 from scalper.dashboard.config import DashboardConfig
 from scalper.dashboard.controller import BotRegistry, BotRunParams
 from scalper.dashboard.stats import SessionStats
@@ -70,6 +71,7 @@ class DashboardServer:
         registry: BotRegistry | None = None,
         symbol_service: BinanceSymbolService | None = None,
         account_service: BinanceAccountService | None = None,
+        book_service: BookSnapshotService | None = None,
     ) -> None:
         self._config = config
         self._tailer = tailer if tailer is not None else JournalTailer(
@@ -80,6 +82,7 @@ class DashboardServer:
         self._stats = SessionStats(self._tailer)
         self._symbol_service = symbol_service
         self._account_service = account_service
+        self._book_service = book_service
         self._connected_clients: int = 0
 
     @property
@@ -165,6 +168,22 @@ class DashboardServer:
                 "total_unrealized_pnl": bal.total_unrealized_pnl,
                 "quote_asset": bal.quote_asset,
                 "fetched_at_ms": bal.fetched_at_ms,
+            })
+
+        @app.get("/api/orderbook/{symbol}")
+        async def orderbook(symbol: str, depth: int = 10) -> JSONResponse:
+            if self._book_service is None:
+                raise HTTPException(503, "book service not configured")
+            try:
+                snap = await self._book_service.get(symbol, depth=depth)
+            except Exception as e:
+                raise HTTPException(502, f"depth fetch failed: {e}") from e
+            return JSONResponse({
+                "symbol": snap.symbol,
+                "bids": [[lvl.price, lvl.size] for lvl in snap.bids],
+                "asks": [[lvl.price, lvl.size] for lvl in snap.asks],
+                "fetched_at_ms": snap.fetched_at_ms,
+                "last_update_id": snap.last_update_id,
             })
 
         @app.get("/api/symbols")
@@ -319,11 +338,12 @@ def create_app(
     registry: BotRegistry | None = None,
     symbol_service: BinanceSymbolService | None = None,
     account_service: BinanceAccountService | None = None,
+    book_service: BookSnapshotService | None = None,
 ) -> FastAPI:
     """Фабрика для uvicorn. Якщо registry=None — UI буде read-only."""
     server = DashboardServer(
         config, registry=registry, symbol_service=symbol_service,
-        account_service=account_service,
+        account_service=account_service, book_service=book_service,
     )
     return server.build_app()
 
