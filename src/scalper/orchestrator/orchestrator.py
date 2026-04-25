@@ -291,6 +291,12 @@ class Orchestrator:
             return
         for sym in self._symbols:
             self._regime.reclassify(sym)
+        # Safety net: відловити PENDING_ENTRY які застрягли (user-stream WS
+        # може мовчати — перевіряємо через REST).
+        try:
+            await self._position.reconcile_pending_entries()   # type: ignore[attr-defined]
+        except AttributeError:
+            pass   # FakePosition у деяких тестах
         self._log(EventKind.HEARTBEAT, payload={
             "daily_r": self._risk.get_daily_r(),
             "monthly_r": self._risk.get_monthly_r(),

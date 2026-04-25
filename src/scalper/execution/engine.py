@@ -49,6 +49,7 @@ class OrderTransport(Protocol):
     async def place_order(self, params: dict[str, Any]) -> dict[str, Any]: ...
     async def cancel_order(self, symbol: str, client_order_id: str) -> dict[str, Any]: ...
     async def get_open_orders(self, symbol: str) -> list[dict[str, Any]]: ...
+    async def get_position_risk(self, symbol: str) -> list[dict[str, Any]]: ...
 
 
 @dataclass
@@ -175,6 +176,24 @@ class ExecutionEngine:
             results.append(await self.cancel_order(symbol, coid))
         return results
 
+    async def get_open_orders(self, symbol: str) -> list[dict[str, Any]]:
+        """Proxy до transport — для PositionManager.reconcile_pending_entries."""
+        try:
+            return await self._transport.get_open_orders(symbol)
+        except ExchangeError as e:
+            logger.warning("get_open_orders failed: %s", e)
+            return []
+
+    async def get_position_risk(self, symbol: str) -> list[dict[str, Any]]:
+        """Proxy: реальна позиція на біржі (positionAmt). Потрібно reconcile,
+        щоб виставляти protection із саме тим qty що Binance тримає, а не з
+        plan.position_size (LIMIT IOC міг частково виконатися)."""
+        try:
+            return await self._transport.get_position_risk(symbol)
+        except (ExchangeError, AttributeError) as e:
+            logger.warning("get_position_risk failed: %s", e)
+            return []
+
     # === User stream hook ===
 
     async def handle_user_event(self, event: dict[str, Any]) -> None:
@@ -294,8 +313,11 @@ class ExecutionEngine:
         data: dict[str, Any], coid: str, sent_ms: int, resp_ms: int,
     ) -> OrderResult:
         status: OrderStatus = data.get("status", "NEW")
-        success = status not in ("REJECTED", "EXPIRED")
         filled = float(data.get("executedQty", 0) or 0)
+        # EXPIRED з частковим fill (IOC LIMIT часто дає PARTIALLY → EXPIRED) —
+        # це УСПІШНИЙ partial fill, НЕ rejection. Без цього бот накопичує
+        # orphan-позиції на біржі без SL/TP.
+        success = (status not in ("REJECTED", "EXPIRED")) or filled > 0
         avg = data.get("avgPrice") or data.get("avg_fill_price")
         avg_price = float(avg) if avg not in (None, 0, "0", "") else None
         return OrderResult(

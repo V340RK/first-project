@@ -56,6 +56,11 @@ class OpenPosition:
     filled_qty: float = 0.0
     remaining_qty: float = 0.0
     avg_entry_price: float = 0.0
+    # Захист від подвійного підрахунку: REST place_order response уже може
+    # повернути executedQty > 0 (entry fill вже стався на біржі). Ми трактуємо
+    # це як перший fill і ставимо protection одразу. Коли user-stream WS
+    # пізніше надішле той самий fill, ми скіпаємо за `entry_processed_via_rest`.
+    entry_processed_via_rest: bool = False
 
     realized_pnl_usd: float = 0.0
     realized_r: float = 0.0
@@ -144,13 +149,23 @@ class PositionManager:
         )
         self._positions[plan.symbol] = pos
 
-        # Якщо entry відразу виконаний (MARKET → FILLED) — виставити захист
-        if result.status == "FILLED" and result.filled_qty > 0:
+        # CRITICAL: довіряємо REST place_order відповіді — якщо filled_qty>0,
+        # це означає що Binance ВЖЕ виконав ордер (повністю або частково).
+        # Виставляємо захист одразу замість чекати fill через user-stream WS,
+        # який періодично мовчить (testnet listenKey expires + WS silence).
+        # Раніше було `if status == "FILLED"` — пропускав випадки де REST
+        # повернув PARTIALLY_FILLED (на live LIMIT IOC так буває часто).
+        if result.filled_qty > 0:
             pos.filled_qty = result.filled_qty
             pos.remaining_qty = result.filled_qty
             pos.avg_entry_price = result.avg_fill_price or plan.entry_price
             pos.state = PositionState.ACTIVE
+            pos.entry_processed_via_rest = True
             await self._place_protection(pos)
+            logger.info(
+                "%s entry processed from REST response: filled=%g @ %g — protection placed",
+                plan.symbol, result.filled_qty, pos.avg_entry_price,
+            )
         return True
 
     def has_open_position(self, symbol: str) -> bool:
@@ -162,6 +177,74 @@ class PositionManager:
 
     def all_open(self) -> list[OpenPosition]:
         return [p for p in self._positions.values() if p.state != PositionState.CLOSED]
+
+    async def reconcile_pending_entries(self, *, stale_after_ms: int = 5000) -> None:
+        """REST-poll fallback: якщо PENDING_ENTRY застрягло > stale_after_ms,
+        перевіряємо через get_open_orders. Якщо ордера немає у списку open
+        (значить вже виконаний або скасований) — припускаємо FILLED з plan
+        params і виставляємо protection. Захищає від випадку коли user-stream
+        WS мовчить (testnet listen key issues).
+
+        Викликається з Orchestrator.on_slow_tick (раз на секунду)."""
+        now = self._clock()
+        by_symbol: dict[str, list[OpenPosition]] = {}
+        for pos in self._positions.values():
+            if (pos.state == PositionState.PENDING_ENTRY
+                    and not pos.entry_processed_via_rest
+                    and now - pos.opened_at_ms > stale_after_ms):
+                by_symbol.setdefault(pos.symbol, []).append(pos)
+        for sym, positions in by_symbol.items():
+            try:
+                open_orders = await self._execution.get_open_orders(sym)   # type: ignore[attr-defined]
+            except Exception as e:
+                logger.warning("reconcile: get_open_orders(%s) failed: %s", sym, e)
+                continue
+            open_coids = {o.get("clientOrderId") for o in open_orders}
+            for pos in positions:
+                if pos.entry_coid in open_coids:
+                    continue   # ще ордер живе, чекаємо
+                # Не у open list → вже виконаний (або скасований/expired).
+                # Беремо реальний positionAmt з біржі — інакше protection
+                # буде з plan.position_size (а реально fill міг бути меншим
+                # на LIMIT IOC), і SL з reduce_only буде reject як
+                # "ReduceOnly Order would increase position".
+                actual_qty = 0.0
+                actual_entry = pos.plan.entry_price
+                try:
+                    pos_risks = await self._execution.get_position_risk(pos.symbol)   # type: ignore[attr-defined]
+                except Exception as e:
+                    logger.warning("reconcile: get_position_risk(%s) failed: %s", pos.symbol, e)
+                    pos_risks = []
+                for pr in pos_risks:
+                    amt = abs(float(pr.get("positionAmt", 0) or 0))
+                    if amt > 0:
+                        actual_qty = amt
+                        ep = pr.get("entryPrice")
+                        if ep:
+                            actual_entry = float(ep)
+                        break
+
+                if actual_qty <= 0:
+                    # Ордер не filled (cancelled/expired без fill). Закриваємо
+                    # позицію локально — нічого закривати на біржі.
+                    logger.info(
+                        "%s: entry %s expired without fill — dropping local position",
+                        pos.symbol, pos.entry_coid,
+                    )
+                    pos.state = PositionState.CLOSED
+                    self._positions.pop(pos.symbol, None)
+                    continue
+
+                logger.warning(
+                    "%s: entry filled via REST poll: actual_qty=%g @ %g (plan was %g) — placing protection",
+                    pos.symbol, actual_qty, actual_entry, pos.plan.position_size or 0,
+                )
+                pos.filled_qty = actual_qty
+                pos.remaining_qty = actual_qty
+                pos.avg_entry_price = actual_entry
+                pos.state = PositionState.ACTIVE
+                pos.entry_processed_via_rest = True
+                await self._place_protection(pos)
 
     async def on_features(self, features: Features) -> None:
         pos = self._positions.get(features.snapshot.symbol)
@@ -202,6 +285,14 @@ class PositionManager:
     async def _on_fill(self, fill: FillEvent) -> None:
         pos = self._find_by_coid(fill.client_order_id)
         if pos is None:
+            return
+
+        # Dedup: якщо entry вже оброблений через REST place_order response,
+        # WS-fill для того ж entry — duplicate. Скіпаємо повністю (включно
+        # з commission, бо Binance повертає total commission уже у REST result
+        # для FILLED ордерів; для partial — підрахунок все одно нечіткий).
+        if (fill.client_order_id == pos.entry_coid
+                and pos.entry_processed_via_rest):
             return
 
         pos.fees_usd += fill.commission_usd

@@ -65,5 +65,16 @@ class BinanceOrderTransport:
             return result
         return []
 
+    async def get_position_risk(self, symbol: str) -> list[dict[str, Any]]:
+        try:
+            result = await self._transport.private_get(
+                "/fapi/v2/positionRisk", params={"symbol": symbol}, weight=5,
+            )
+        except RestError as e:
+            raise ExchangeError(e.code or -1, e.message) from e
+        if isinstance(result, list):
+            return result
+        return []
+
 
 __all__ = ["BinanceOrderTransport"]

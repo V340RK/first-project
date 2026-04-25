@@ -200,6 +200,22 @@ risk:
 
 **Залишений блокер #18 (для наступної сесії):** Open Orders на біржі = 0 — SL/TP не виставлені. PositionManager викликає `_place_protection()` тільки коли `result.status == "FILLED"`. Live entry повертається як `NEW` (LIMIT IOC) → бот чекає fill через WebSocket user stream → user stream періодично мовчить (`listenKey expired`, `WS silence on user: 32996ms`) → fill не доставляється → protection не виставляється → позиція висить без SL.
 
+### Четверте коло debug «orphan позиція без SL» (#18 розкритий)
+
+Користувач обрав варіант "всі 3 разом" (trust REST + REST poll + listen key supervisor). По шляху знайшов ще 2 баги. Усього в цьому раунді **5 фіксів**:
+
+| # | Симптом | Корінь | Фікс |
+|---|---|---|---|
+| 18a | Live LIMIT IOC entry → REST повертає `status=NEW filled_qty>0` (PARTIAL), але PositionManager перевіряв тільки `status=="FILLED"` → protection не ставив, чекав WS fill, який мовчав | `if result.status == "FILLED"` → `if result.filled_qty > 0` (status irrelevant) | [`position/manager.py:152`](src/scalper/position/manager.py) — `entry_processed_via_rest=True` flag для дедупу |
+| 18b | Якщо REST повернув filled_qty=0 але реально на біржі fill потім стався (race), позиція висить у PENDING_ENTRY вічно | Ніхто не запитує статус ордера після N сек | `PositionManager.reconcile_pending_entries()` дзвонить `get_open_orders` через 5с; якщо entry_coid немає у відкритих → presume filled. Викликається з Orchestrator.on_slow_tick |
+| 18c | WS fill приходить пізно для уже-обробленого через REST entry → `_on_fill` подвоює qty/commission і повторно дзвонить `_place_protection` | Не було дедупу між REST та WS-каналами | У `_on_fill`: `if fill.client_order_id == pos.entry_coid and pos.entry_processed_via_rest: return` |
+| 18d | Reconcile використовував `plan.position_size` (0.29 BTC), але реальний fill був 0.005 → `_place_protection` ставив SL з reduce_only qty=0.29 → Binance reject `"max_retries"` → `EMERGENCY close` лупа | Reconcile не знав реальної positionAmt акаунту | Додано `OrderTransport.get_position_risk()` + Binance `/fapi/v2/positionRisk`. Reconcile читає `actual_qty` з біржі, ставить SL/TP саме з нею. Якщо positionAmt=0 → ордер expired без fill, drop locally |
+| bonus | LIMIT IOC partial → `status="EXPIRED"` (бо залишок auto-cancelled). `_parse_order_result` каже `success = status not in ("REJECTED", "EXPIRED")` → бот трактує як reject → не зберігає позицію → потім re-place_order накопичує orphan'и на біржі | EXPIRED ≠ rejection якщо filled_qty>0 | `success = (status not in ("REJECTED", "EXPIRED")) or filled > 0` |
+
+**Тести:** +8 нових (`tests/position/test_rest_fill_paths.py`), 308/308 passing. Покривають REST trust, dedup REST↔WS, reconcile-uses-real-positionAmt, drop-on-no-actual-fill.
+
+**Підтвердження безпеки:** на тонкому testnet ордер часто не filled взагалі — reconcile тепер коректно бачить `positionRisk=0` і логує `"entry expired without fill — dropping local position"` без orphan'ів і без emergency_close циклу.
+
 ---
 
 ## Що лишилось до prod

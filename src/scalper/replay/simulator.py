@@ -195,6 +195,21 @@ class SimulatedExecutionEngine:
         coids = [c for c, s in self._state.pending.items() if s.request.symbol == symbol]
         return [await self.cancel_order(symbol, c) for c in coids]
 
+    async def get_open_orders(self, symbol: str) -> list[dict]:
+        """Для compatibility з PositionManager.reconcile_pending_entries."""
+        return [
+            {"clientOrderId": c, "symbol": s.request.symbol,
+             "side": s.request.side.value, "type": s.request.type.value,
+             "origQty": s.request.qty, "status": s.status}
+            for c, s in self._state.pending.items()
+            if s.request.symbol == symbol
+        ]
+
+    async def get_position_risk(self, symbol: str) -> list[dict]:
+        """Симулятор не тримає реальні позиції біржі — повертає пусто.
+        PositionManager._reconcile тоді трактує як "expired without fill"."""
+        return []
+
     # === Clock / tick hook ===
 
     async def on_clock_tick(self, sim_time_ms: int) -> None:
