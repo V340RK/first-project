@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from scalper.common import time as _time
+from scalper.dashboard.account import BinanceAccountService
 from scalper.dashboard.config import DashboardConfig
 from scalper.dashboard.controller import BotRegistry, BotRunParams
 from scalper.dashboard.stats import SessionStats
@@ -42,9 +43,9 @@ class StartBotRequest(BaseModel):
     symbol: str = Field(min_length=1)
     leverage: int = Field(ge=1, le=125)
     risk_per_trade_usd: float = Field(gt=0)
-    equity_usd: float = Field(gt=0)
     mode: str = "live"
     score_threshold_override: float | None = None
+    # equity_usd НЕ приймається ззовні — береться з реального balance API
 
 
 class StopBotRequest(BaseModel):
@@ -60,6 +61,7 @@ class DashboardServer:
         tailer: JournalTailer | None = None,
         registry: BotRegistry | None = None,
         symbol_service: BinanceSymbolService | None = None,
+        account_service: BinanceAccountService | None = None,
     ) -> None:
         self._config = config
         self._tailer = tailer if tailer is not None else JournalTailer(
@@ -69,6 +71,7 @@ class DashboardServer:
         self._registry = registry
         self._stats = SessionStats(self._tailer)
         self._symbol_service = symbol_service
+        self._account_service = account_service
         self._connected_clients: int = 0
 
     @property
@@ -139,6 +142,23 @@ class DashboardServer:
                 }
             return JSONResponse({"slots": slots})
 
+        @app.get("/api/account/balance")
+        async def account_balance() -> JSONResponse:
+            if self._account_service is None:
+                raise HTTPException(503, "account service not configured")
+            try:
+                bal = await self._account_service.get_balance()
+            except Exception as e:
+                raise HTTPException(502, f"Binance account API error: {e}") from e
+            return JSONResponse({
+                "wallet_balance": bal.wallet_balance,
+                "available_balance": bal.available_balance,
+                "margin_balance": bal.margin_balance,
+                "total_unrealized_pnl": bal.total_unrealized_pnl,
+                "quote_asset": bal.quote_asset,
+                "fetched_at_ms": bal.fetched_at_ms,
+            })
+
         @app.get("/api/symbols")
         async def list_symbols() -> JSONResponse:
             if self._symbol_service is None:
@@ -172,10 +192,28 @@ class DashboardServer:
                         422, f"невідома пара на Binance: {sym}",
                     )
 
+            # Equity тягнемо з реального balance API (не довіряємо UI input).
+            # Якщо account service не доступний — fallback default 100, але це
+            # сигнал помилки для оператора.
+            if self._account_service is not None:
+                try:
+                    bal = await self._account_service.get_balance()
+                    equity_usd = bal.available_balance
+                except Exception as e:
+                    raise HTTPException(
+                        502, f"не можу отримати баланс акаунту: {e}",
+                    ) from e
+                if equity_usd <= 0:
+                    raise HTTPException(
+                        409, f"баланс акаунту = {equity_usd}; пополни перед стартом",
+                    )
+            else:
+                equity_usd = 100.0   # only for tests без account_service
+
             params = BotRunParams(
                 symbol=sym, leverage=req.leverage,
                 risk_per_trade_usd=req.risk_per_trade_usd,
-                equity_usd=req.equity_usd, mode=req.mode,
+                equity_usd=equity_usd, mode=req.mode,
                 score_threshold_override=req.score_threshold_override,
             )
             self._stats.reset(sym)
@@ -248,9 +286,13 @@ def create_app(
     config: DashboardConfig,
     registry: BotRegistry | None = None,
     symbol_service: BinanceSymbolService | None = None,
+    account_service: BinanceAccountService | None = None,
 ) -> FastAPI:
     """Фабрика для uvicorn. Якщо registry=None — UI буде read-only."""
-    server = DashboardServer(config, registry=registry, symbol_service=symbol_service)
+    server = DashboardServer(
+        config, registry=registry, symbol_service=symbol_service,
+        account_service=account_service,
+    )
     return server.build_app()
 
 

@@ -13,6 +13,22 @@
             <div class="sub">scalper control panel — кожна пара торгується окремим процесом</div>
         </header>
 
+        <section class="card balance-bar">
+            <div class="balance-block">
+                <div class="balance-label">Доступно на акаунті</div>
+                <div class="balance-value" id="balance-available">— USDT</div>
+            </div>
+            <div class="balance-block">
+                <div class="balance-label">Wallet (всього)</div>
+                <div class="balance-value-small" id="balance-wallet">—</div>
+            </div>
+            <div class="balance-block">
+                <div class="balance-label">Unrealized PnL</div>
+                <div class="balance-value-small" id="balance-upnl">—</div>
+            </div>
+            <div class="balance-meta" id="balance-meta">оновлюється…</div>
+        </section>
+
         <section class="card">
             <label class="label">Додати пару (з <span id="symbols-count">—</span> доступних на Binance Futures USDT-M):</label>
             <div class="chips-box" id="add-pair-box">
@@ -54,10 +70,6 @@
                 <div class="form-row">
                     <label>Ризик на угоду (USDT)</label>
                     <input type="number" class="slot-risk" min="0.01" step="0.01" value="0.50" />
-                </div>
-                <div class="form-row">
-                    <label>Баланс акаунту (USDT)</label>
-                    <input type="number" class="slot-equity" min="1" step="1" value="100" />
                 </div>
                 <div class="form-row">
                     <label>Режим</label>

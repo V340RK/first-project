@@ -11,6 +11,7 @@ from pathlib import Path
 
 import uvicorn
 
+from scalper.dashboard.account import BinanceAccountService
 from scalper.dashboard.config import DashboardConfig
 from scalper.dashboard.controller import BotRegistry
 from scalper.dashboard.server import create_app
@@ -56,20 +57,39 @@ def main() -> None:
             runtime_configs_dir=args.runtime_configs_dir,
         )
 
-    # SymbolService: визначаємо base_url з flags або .env
-    base_url = args.binance_base_url
-    if base_url is None:
-        from dotenv import load_dotenv
-        import os as _os
-        load_dotenv(override=False)
-        testnet = _os.environ.get("BINANCE_TESTNET", "true").strip().lower() in ("1", "true", "yes", "on")
-        base_url = (
-            "https://testnet.binancefuture.com" if testnet
-            else "https://fapi.binance.com"
-        )
+    # Зчитуємо .env, щоб знати testnet flag + API ключі для AccountService
+    from dotenv import load_dotenv
+    import os as _os
+    load_dotenv(override=False)
+    testnet = _os.environ.get("BINANCE_TESTNET", "true").strip().lower() in ("1", "true", "yes", "on")
+    base_url = args.binance_base_url or (
+        "https://testnet.binancefuture.com" if testnet
+        else "https://fapi.binance.com"
+    )
     symbol_service = BinanceSymbolService(base_url)
 
-    app = create_app(config, registry=registry, symbol_service=symbol_service)
+    # AccountService потребує API key/secret + спільний транспорт зі timing sync.
+    account_service: BinanceAccountService | None = None
+    api_key = _os.environ.get("BINANCE_API_KEY", "").strip()
+    api_secret = _os.environ.get("BINANCE_API_SECRET", "").strip()
+    if api_key and api_secret:
+        from pydantic import SecretStr
+        from scalper.gateway.config import GatewayConfig
+        from scalper.gateway.transport import _RestTransport
+        gw_cfg = GatewayConfig(
+            testnet=testnet, base_url=base_url,
+            ws_url=("wss://stream.binancefuture.com" if testnet else "wss://fstream.binance.com"),
+            api_key=SecretStr(api_key), secret_key=SecretStr(api_secret),
+        )
+        rest = _RestTransport(gw_cfg)
+        account_service = BinanceAccountService(rest)
+    else:
+        print("WARNING: BINANCE_API_KEY/SECRET відсутні — баланс не доступний")
+
+    app = create_app(
+        config, registry=registry, symbol_service=symbol_service,
+        account_service=account_service,
+    )
     uvicorn.run(app, host=config.host, port=config.port, log_level=args.log_level.lower())
 
 

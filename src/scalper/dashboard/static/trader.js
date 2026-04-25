@@ -11,7 +11,13 @@
         emptyState: $("empty-state"),
         slotTemplate: $("slot-template"),
         errorBanner: $("error-banner"),
+        balanceAvailable: $("balance-available"),
+        balanceWallet: $("balance-wallet"),
+        balanceUpnl: $("balance-upnl"),
+        balanceMeta: $("balance-meta"),
     };
+
+    let lastBalance = null;   // {wallet_balance, available_balance, ...}
 
     const LS_KEY = "v340rk.slots";
     const state = {
@@ -28,7 +34,6 @@
                 symbol: sym,
                 leverage: slot.nodes.leverage.value,
                 risk: slot.nodes.risk.value,
-                equity: slot.nodes.equity.value,
                 mode: slot.nodes.mode.value,
             });
         });
@@ -109,7 +114,6 @@
             leverage: card.querySelector(".slot-leverage"),
             leverageVal: card.querySelector(".leverage-val"),
             risk: card.querySelector(".slot-risk"),
-            equity: card.querySelector(".slot-equity"),
             mode: card.querySelector(".slot-mode"),
             startBtn: card.querySelector(".slot-start"),
             stopBtn: card.querySelector(".slot-stop"),
@@ -126,7 +130,6 @@
         if (prefill) {
             if (prefill.leverage) nodes.leverage.value = prefill.leverage;
             if (prefill.risk) nodes.risk.value = prefill.risk;
-            if (prefill.equity) nodes.equity.value = prefill.equity;
             if (prefill.mode) nodes.mode.value = prefill.mode;
         }
         nodes.leverageVal.textContent = `${nodes.leverage.value}x`;
@@ -137,7 +140,7 @@
             saveSlots();
         });
         ["change", "input"].forEach(ev => {
-            [nodes.risk, nodes.equity, nodes.mode].forEach(n => {
+            [nodes.risk, nodes.mode].forEach(n => {
                 n.addEventListener(ev, saveSlots);
             });
         });
@@ -173,11 +176,14 @@
             symbol: sym,
             leverage: parseInt(slot.nodes.leverage.value, 10),
             risk_per_trade_usd: parseFloat(slot.nodes.risk.value),
-            equity_usd: parseFloat(slot.nodes.equity.value),
             mode: slot.nodes.mode.value,
+            // equity_usd НЕ передається — backend бере з реального API
         };
         if (!(payload.risk_per_trade_usd > 0)) { showError(`${sym}: ризик > 0`); return; }
-        if (!(payload.equity_usd > 0)) { showError(`${sym}: баланс > 0`); return; }
+        if (lastBalance && lastBalance.available_balance <= 0) {
+            showError(`${sym}: баланс акаунту = 0; пополни перед стартом`);
+            return;
+        }
 
         slot.nodes.startBtn.disabled = true;
         try {
@@ -228,7 +234,7 @@
         slot.nodes.stopBtn.disabled = !running;
         slot.nodes.remove.disabled = running;
         // Заборона змінювати конфіг під час роботи (для прозорості)
-        [slot.nodes.leverage, slot.nodes.risk, slot.nodes.equity, slot.nodes.mode]
+        [slot.nodes.leverage, slot.nodes.risk, slot.nodes.mode]
             .forEach(n => { n.disabled = running; });
 
         if (session) {
@@ -240,6 +246,37 @@
             slot.nodes.stat.usd.className = "stat-value stat-usd " + pnlClass(session.realized_usd);
             slot.nodes.stat.open.textContent = session.open_positions ?? 0;
             slot.nodes.stat.last.textContent = formatLastEvent(session.last_event_ms);
+        }
+    }
+
+    function formatBalanceUsd(v) {
+        if (typeof v !== "number") return "—";
+        return v.toFixed(2);
+    }
+
+    async function fetchBalance() {
+        try {
+            const resp = await fetch("/api/account/balance");
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({detail: resp.statusText}));
+                throw new Error(err.detail || `HTTP ${resp.status}`);
+            }
+            const b = await resp.json();
+            lastBalance = b;
+            el.balanceAvailable.textContent = `${formatBalanceUsd(b.available_balance)} ${b.quote_asset}`;
+            el.balanceWallet.textContent = `${formatBalanceUsd(b.wallet_balance)} ${b.quote_asset}`;
+            el.balanceUpnl.textContent = (b.total_unrealized_pnl >= 0 ? "+" : "") +
+                `${formatBalanceUsd(b.total_unrealized_pnl)} ${b.quote_asset}`;
+            el.balanceUpnl.className = "balance-value-small " +
+                (b.total_unrealized_pnl > 0 ? "positive" :
+                 b.total_unrealized_pnl < 0 ? "negative" : "");
+            el.balanceMeta.textContent = `оновлено ${new Date(b.fetched_at_ms || Date.now()).toLocaleTimeString()}`;
+            el.balanceMeta.classList.remove("error");
+        } catch (e) {
+            el.balanceAvailable.textContent = "недоступно";
+            el.balanceMeta.textContent = `помилка: ${e.message}`;
+            el.balanceMeta.classList.add("error");
+            lastBalance = null;
         }
     }
 
@@ -382,4 +419,6 @@
     });
     fetchStatus();
     setInterval(fetchStatus, 1000);
+    fetchBalance();
+    setInterval(fetchBalance, 3000);    // баланс не змінюється так часто
 })();

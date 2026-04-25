@@ -211,6 +211,59 @@ body {
     text-align: center;
 }
 
+/* === Balance bar === */
+
+.balance-bar {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 18px;
+    align-items: center;
+    background: linear-gradient(135deg, #1a1f2c 0%, #1c212d 100%);
+    position: relative;
+}
+
+.balance-block {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.balance-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.balance-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+
+.balance-value-small {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.balance-value-small.positive { color: var(--positive); }
+.balance-value-small.negative { color: var(--negative); }
+
+.balance-meta {
+    position: absolute;
+    bottom: 6px;
+    right: 12px;
+    font-size: 10px;
+    color: var(--text-dim);
+}
+
+.balance-meta.error {
+    color: var(--danger);
+}
+
 /* === Slot cards === */
 
 #slots-container {

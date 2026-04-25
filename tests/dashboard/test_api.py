@@ -28,6 +28,19 @@ def _fake_symbol_service(symbols: list[str] = ["BTCUSDT", "ETHUSDT"]):   # type:
     return svc
 
 
+def _fake_account_service(available: float = 5000.0):   # type: ignore[no-untyped-def]
+    from scalper.dashboard.account import AccountBalance, BinanceAccountService
+    svc = MagicMock(spec=BinanceAccountService)
+    bal = AccountBalance(
+        wallet_balance=available, available_balance=available,
+        margin_balance=available, total_unrealized_pnl=0.0,
+        fetched_at_ms=1000,
+    )
+    async def _get(): return bal
+    svc.get_balance = _get
+    return svc
+
+
 @pytest.fixture()
 def app_with_fake_registry(tmp_path: Path):   # type: ignore[no-untyped-def]
     reg = MagicMock(spec=BotRegistry)
@@ -37,7 +50,10 @@ def app_with_fake_registry(tmp_path: Path):   # type: ignore[no-untyped-def]
     reg.all_statuses.return_value = {}
     cfg = DashboardConfig(journal_dir=tmp_path / "journal")
     cfg.journal_dir.mkdir()
-    app = create_app(cfg, registry=reg, symbol_service=_fake_symbol_service())
+    app = create_app(
+        cfg, registry=reg, symbol_service=_fake_symbol_service(),
+        account_service=_fake_account_service(),
+    )
     return app, reg
 
 
@@ -180,19 +196,67 @@ def test_start_validates_payload(app_with_fake_registry) -> None:   # type: igno
     with TestClient(app) as client:
         # Empty symbol
         r = client.post("/api/bot/start", json={
-            "symbol": "", "leverage": 5,
-            "risk_per_trade_usd": 0.1, "equity_usd": 50.0, "mode": "paper",
+            "symbol": "", "leverage": 5, "risk_per_trade_usd": 0.1, "mode": "paper",
         })
         assert r.status_code == 422
         # Leverage > 125
         r = client.post("/api/bot/start", json={
             "symbol": "BTCUSDT", "leverage": 200,
-            "risk_per_trade_usd": 0.1, "equity_usd": 50.0, "mode": "paper",
+            "risk_per_trade_usd": 0.1, "mode": "paper",
         })
         assert r.status_code == 422
         # Risk = 0
         r = client.post("/api/bot/start", json={
             "symbol": "BTCUSDT", "leverage": 5,
-            "risk_per_trade_usd": 0, "equity_usd": 50.0, "mode": "paper",
+            "risk_per_trade_usd": 0, "mode": "paper",
         })
         assert r.status_code == 422
+
+
+def test_balance_endpoint_returns_real_numbers(app_with_fake_registry) -> None:   # type: ignore[no-untyped-def]
+    app, _ = app_with_fake_registry
+    with TestClient(app) as client:
+        r = client.get("/api/account/balance")
+        assert r.status_code == 200
+        b = r.json()
+        assert b["available_balance"] == 5000.0
+        assert b["wallet_balance"] == 5000.0
+        assert b["quote_asset"] == "USDT"
+
+
+def test_start_uses_live_balance_for_equity(app_with_fake_registry) -> None:   # type: ignore[no-untyped-def]
+    """equity_usd НЕ приймається з форми, бот стартує з API balance."""
+    app, reg = app_with_fake_registry
+    reg.start.return_value = BotStatus(
+        running=True, pid=1, started_at_ms=0, params=None, exit_code=None,
+    )
+    with TestClient(app) as client:
+        r = client.post("/api/bot/start", json={
+            "symbol": "BTCUSDT", "leverage": 5,
+            "risk_per_trade_usd": 0.5, "mode": "paper",
+            "equity_usd": 99999,   # ← має ігноруватися
+        })
+        assert r.status_code == 200
+        called = reg.start.call_args.args[0]
+        assert called.equity_usd == 5000.0   # з fake_account_service
+
+
+def test_start_blocks_when_balance_zero(tmp_path: Path) -> None:
+    cfg = DashboardConfig(journal_dir=tmp_path / "j")
+    cfg.journal_dir.mkdir()
+    reg = MagicMock(spec=BotRegistry)
+    reg.status.return_value = BotStatus(
+        running=False, pid=None, started_at_ms=None, params=None, exit_code=None,
+    )
+    app = create_app(
+        cfg, registry=reg, symbol_service=_fake_symbol_service(),
+        account_service=_fake_account_service(available=0.0),
+    )
+    with TestClient(app) as client:
+        r = client.post("/api/bot/start", json={
+            "symbol": "BTCUSDT", "leverage": 5,
+            "risk_per_trade_usd": 0.5, "mode": "paper",
+        })
+        assert r.status_code == 409
+        assert "баланс" in r.json()["detail"]
+        reg.start.assert_not_called()
