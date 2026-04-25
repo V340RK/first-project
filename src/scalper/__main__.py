@@ -79,7 +79,16 @@ async def run(cfg: AppConfig) -> None:
     # Передаємо плече з AppConfig у RiskEngine, щоб notional cap відповідав
     # реальному маржинальному обмеженню акаунту.
     risk_cfg = cfg.risk.model_copy(update={"leverage": cfg.leverage})
-    risk = RiskEngine(risk_cfg)
+
+    # filters_resolver: реальні per-symbol step_size/min_notional з ExchangeInfo.
+    # Без нього RiskEngine використовує BTC-калібровані fallback (0.001/5.0),
+    # які false-rejектять дрібні coin pairs (HYPER/D/SOL).
+    def _resolve_filters(symbol: str):   # type: ignore[no-untyped-def]
+        try:
+            return gateway.get_symbol_filters(symbol)
+        except Exception:
+            return None
+    risk = RiskEngine(risk_cfg, filters_resolver=_resolve_filters)
     position = PositionManager(cfg.position, execution, risk)   # type: ignore[arg-type]
     decision = DecisionEngine(cfg.decision, regime, risk=risk, expectancy=expectancy, position=position)
 

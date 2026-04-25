@@ -235,6 +235,28 @@ Notional cap (`equity * leverage * 0.9`) залишається активним
 
 Тести: +4 у `tests/risk/test_margin_sizing.py` — margin-mode фіксує qty незалежно від stop_distance, R-mode ignoring margin field, notional cap працює і в margin-mode, default behavior збережено.
 
+### Дрібні пари не торгують: `qty_rounded_to_zero` / `notional_below_min`
+
+Користувач: «BTC торгує, а HYPER/D/APE — ні. Це налаштування чи ринок?»
+
+Журнал:
+```
+HYPERUSDT: risk:notional_below_min (0.55 < 5.0)
+DUSDT:     risk:qty_rounded_to_zero
+ETHUSDT:   dec:score_below_threshold (score=0.0)   ← це ринок, тонкий
+APEUSDT:   0 setup_candidate                       ← це ринок, тонкий
+```
+
+Корінь: **RiskEngine використовував `fallback_step_size=0.001` і `fallback_min_notional=5.0`** з `RiskConfig` для **усіх символів**. Це BTC-калібровані значення. Реальні Binance filters для HYPER/D/etc. інші: step=1, min_notional=20 і т.д. На pairs з price < 1 USDT і дрібним margin → qty округлюється до 0 BTC-step або notional не дотягує до реального min.
+
+Фікс:
+- `RiskEngine.__init__(filters_resolver: Callable[[str], SymbolFilters | None] | None = None)`. У `__main__.py` передаємо `gateway.get_symbol_filters` → реальні per-symbol параметри з ExchangeInfo.
+- `_compute_size(plan, equity, stop_dist, step_size)` — отримує step з filters.
+- `_filters(symbol)` повертає `(step, min_qty, max_qty, min_notional)` з resolver-а, fallback на config якщо resolver fail/None.
+- При `notional < min_notional` → **спроба auto-bump qty вгору** до `ceil(min_notional/price)`. Якщо bump перевищить notional cap → reject з зрозумілою причиною (`"notional_below_min ...; min order would exceed notional cap"`). Інакше — позиція трошки більша ніж user задав, але trade відбудеться.
+
+Тести: +4 (`test_resolver_overrides_fallback_step_for_low_priced_coin`, `test_resolver_real_min_notional_used_not_fallback`, `test_notional_below_min_rejects_only_when_bump_exceeds_cap`, `test_resolver_failure_falls_back_to_config`).
+
 ---
 
 ## Що лишилось до prod

@@ -104,14 +104,42 @@ class RiskEngine:
         config: RiskConfig,
         *,
         clock_fn: ClockFn | None = None,
+        filters_resolver: Callable[[str], object | None] | None = None,
     ) -> None:
+        """filters_resolver(symbol) -> SymbolFilters | None — для реальних
+        per-symbol step_size/min_qty/min_notional. Без цього (резолвер None
+        або повертає None) — використовуються fallback values з RiskConfig
+        (BTCUSDT-калібровані, неправильні для інших монет → notional_below_min
+        / qty_rounded_to_zero false-rejects)."""
         self._config = config
         from scalper.common import time as _time
         self._clock: ClockFn = clock_fn if clock_fn is not None else (lambda: _time.clock())
+        self._filters_resolver = filters_resolver
         now = self._clock()
         self._state = _RiskState(
             daily=_DailyAccum(date_utc=_utc_day(now)),
             monthly=_MonthlyAccum(year_month=_utc_month(now)),
+        )
+
+    def _filters(self, symbol: str) -> tuple[float, float, float, float]:
+        """Повертає (step_size, min_qty, max_qty, min_notional) для символу.
+        З resolver-а якщо доступно, інакше fallback з RiskConfig."""
+        c = self._config
+        defaults = (c.fallback_step_size, c.fallback_min_qty,
+                    c.fallback_max_qty, c.fallback_min_notional)
+        if self._filters_resolver is None:
+            return defaults
+        try:
+            f = self._filters_resolver(symbol)
+        except Exception:
+            return defaults
+        if f is None:
+            return defaults
+        return (
+            float(getattr(f, "step_size", defaults[0]) or defaults[0]),
+            float(getattr(f, "min_qty", defaults[1]) or defaults[1]),
+            float(getattr(f, "max_qty", defaults[2]) or defaults[2]),
+            float(getattr(f, "min_notional", defaults[3]) or defaults[3]),
         )
 
     # === Public API ===
@@ -132,7 +160,8 @@ class RiskEngine:
         if stop_distance_price <= 0:
             return RiskDecision(plan=None, reason="invalid_stop_distance", snapshot=snapshot)
 
-        qty, risk_usd = self._compute_size(plan, equity_usd, stop_distance_price)
+        step, min_qty, max_qty, min_notional = self._filters(plan.symbol)
+        qty, risk_usd = self._compute_size(plan, equity_usd, stop_distance_price, step)
 
         # Notional cap: тонкий стоп може дати qty з notional > equity*leverage,
         # який Binance відкине як "Margin is insufficient". Обмежуємо до
@@ -140,27 +169,37 @@ class RiskEngine:
         max_notional = equity_usd * self._config.leverage * self._config.max_notional_usage
         max_qty_by_notional = max_notional / plan.entry_price
         if qty > max_qty_by_notional:
-            qty = max_qty_by_notional
+            qty = self._round_step(max_qty_by_notional, step)
             risk_usd = qty * (stop_distance_price + self._buffer_price())
 
         if qty <= 0:
             return RiskDecision(plan=None, reason="qty_rounded_to_zero", snapshot=snapshot)
-        if qty < self._config.fallback_min_qty:
+        if qty < min_qty:
             return RiskDecision(
                 plan=None,
-                reason=f"qty_below_min ({qty} < {self._config.fallback_min_qty})",
+                reason=f"qty_below_min ({qty} < {min_qty})",
                 snapshot=snapshot,
             )
-        if qty > self._config.fallback_max_qty:
-            qty = self._config.fallback_max_qty
+        if qty > max_qty:
+            qty = max_qty
             risk_usd = qty * (stop_distance_price + self._buffer_price())
 
         notional = qty * plan.entry_price
-        if notional < self._config.fallback_min_notional:
-            return RiskDecision(
-                plan=None,
-                reason=f"notional_below_min ({notional:.2f} < {self._config.fallback_min_notional})",
-                snapshot=snapshot,
+        if notional < min_notional:
+            # Спробуємо округлити вгору до min_notional (компроміс між
+            # "не відкривати" та "користувач хоче торгувати маленькою парою").
+            needed_qty = min_notional / plan.entry_price
+            rounded_up_qty = self._round_step_up(needed_qty, step)
+            if rounded_up_qty * plan.entry_price <= max_notional:
+                qty = rounded_up_qty
+                risk_usd = qty * (stop_distance_price + self._buffer_price())
+                notional = qty * plan.entry_price
+            else:
+                return RiskDecision(
+                    plan=None,
+                    reason=f"notional_below_min ({notional:.4f} < {min_notional}; "
+                           f"min order would exceed notional cap)",
+                    snapshot=snapshot,
             )
 
         # Risk overshoot перевіряємо тільки в R-based mode. У margin-mode
@@ -319,22 +358,20 @@ class RiskEngine:
 
     def _compute_size(
         self, plan: TradePlan, equity: float, stop_distance_price: float,
+        step_size: float,
     ) -> tuple[float, float]:
         c = self._config
         effective_distance = stop_distance_price + self._buffer_price()
 
         if c.margin_per_trade_pct is not None and c.margin_per_trade_pct > 0:
-            # Margin-based sizing: фіксована частка balance як margin.
-            # Notional = margin * leverage. R-ризик плаваючий (залежить від stop).
             margin_usd = equity * c.margin_per_trade_pct / 100.0
             notional = margin_usd * c.leverage
             qty = notional / plan.entry_price
         else:
-            # R-based sizing (default): qty з заданого ризику.
             r_usd = min(c.risk_per_trade_usd_abs, equity * c.risk_per_trade_pct)
             qty = r_usd / effective_distance
 
-        qty = self._round_step(qty, c.fallback_step_size)
+        qty = self._round_step(qty, step_size)
         real_risk = qty * effective_distance
         return qty, real_risk
 
@@ -343,6 +380,16 @@ class RiskEngine:
         if step <= 0:
             return qty
         n = int(qty / step)
+        return round(n * step, 12)
+
+    @staticmethod
+    def _round_step_up(qty: float, step: float) -> float:
+        """Округлення ВГОРУ до найближчого step. Для випадку коли треба
+        дотягнути до min_notional."""
+        if step <= 0:
+            return qty
+        import math
+        n = math.ceil(qty / step)
         return round(n * step, 12)
 
     def _is_initiative(self, plan: TradePlan) -> bool:

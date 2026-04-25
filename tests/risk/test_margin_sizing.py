@@ -131,3 +131,78 @@ def test_margin_pct_still_capped_by_notional_usage() -> None:
     assert dec.plan is not None
     # Без cap було б notional=5000. З cap 0.9: max_notional=4500, max_qty=45
     assert dec.plan.position_size == pytest.approx(45.0, abs=0.01)
+
+
+# ============================================================
+# Real per-symbol filters via resolver
+# ============================================================
+
+class _Filt:
+    def __init__(self, step: float, min_qty: float, max_qty: float, min_notional: float):
+        self.step_size = step
+        self.min_qty = min_qty
+        self.max_qty = max_qty
+        self.min_notional = min_notional
+
+
+def test_resolver_overrides_fallback_step_for_low_priced_coin() -> None:
+    """На монеті з step=1 (цілі одиниці) qty не округлюється до 0."""
+    cfg = RiskConfig(
+        margin_per_trade_pct=10.0, leverage=5,
+        fallback_step_size=0.001,    # BTC-style fallback
+        fallback_min_notional=5.0,
+        max_concurrent_positions=99, fallback_max_qty=1_000_000.0,
+    )
+    # Pair з price=$0.5 і real step=1 (типова cheap coin)
+    filt = _Filt(step=1.0, min_qty=1.0, max_qty=100_000, min_notional=5.0)
+    re = RiskEngine(cfg, filters_resolver=lambda s: filt)
+    # margin = 1000*10% = $100, notional = $500, qty = 500/0.5 = 1000 (round step 1 → 1000)
+    dec = re.evaluate(_plan(entry=0.5, stop=0.49), equity_usd=1000.0)
+    assert dec.plan is not None
+    assert dec.plan.position_size == 1000
+
+
+def test_resolver_real_min_notional_used_not_fallback() -> None:
+    """Pair з реальним min_notional=20 (а не 5 з fallback) — справжній check."""
+    cfg = RiskConfig(
+        margin_per_trade_pct=0.1, leverage=5,    # дрібний margin → notional малий
+        fallback_min_notional=5.0,
+        max_concurrent_positions=99, fallback_max_qty=1000.0,
+    )
+    filt = _Filt(step=0.001, min_qty=0.001, max_qty=1000, min_notional=20.0)
+    re = RiskEngine(cfg, filters_resolver=lambda s: filt)
+    # margin = 1000*0.1% = $1, notional bid = $5. Real min_notional=20.
+    # Має auto-bump до min_notional/price = 20/100 = 0.2 (round step 0.001 → 0.2)
+    dec = re.evaluate(_plan(entry=100.0, stop=99.5), equity_usd=1000.0)
+    assert dec.plan is not None
+    assert dec.plan.position_size * 100.0 >= 20.0   # дотягнуто до min_notional
+
+
+def test_notional_below_min_rejects_only_when_bump_exceeds_cap() -> None:
+    """Якщо для досягнення min_notional треба qty більший за notional cap →
+    reject з зрозумілою причиною."""
+    cfg = RiskConfig(
+        margin_per_trade_pct=1.0, leverage=1,
+        fallback_min_notional=5.0, max_notional_usage=0.5,
+        max_concurrent_positions=99, fallback_max_qty=10000.0,
+    )
+    # equity 1000, margin 1% = 10, leverage 1 → notional=10, qty=0.1 на price=100
+    # min_notional=5000 → bump qty до 50, але cap=500 → 50*100=5000 > 500 reject
+    filt = _Filt(step=0.001, min_qty=0.001, max_qty=10000, min_notional=5000.0)
+    re = RiskEngine(cfg, filters_resolver=lambda s: filt)
+    dec = re.evaluate(_plan(entry=100.0, stop=99.5), equity_usd=1000.0)
+    assert dec.plan is None
+    assert "notional_below_min" in dec.reason
+    assert "exceed notional cap" in dec.reason
+
+
+def test_resolver_failure_falls_back_to_config() -> None:
+    """Якщо resolver кидає → use defaults, не падаємо."""
+    cfg = RiskConfig(
+        margin_per_trade_pct=10.0, leverage=5,
+        max_concurrent_positions=99, fallback_max_qty=1000.0,
+    )
+    def _broken(_): raise RuntimeError("boom")
+    re = RiskEngine(cfg, filters_resolver=_broken)
+    dec = re.evaluate(_plan(entry=100.0, stop=99.5), equity_usd=1000.0)
+    assert dec.plan is not None   # fallback values use, не reject
