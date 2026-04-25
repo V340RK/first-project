@@ -15,9 +15,32 @@
         balanceWallet: $("balance-wallet"),
         balanceUpnl: $("balance-upnl"),
         balanceMeta: $("balance-meta"),
+        envBanner: $("env-banner"),
     };
 
     let lastBalance = null;   // {wallet_balance, available_balance, ...}
+    let envInfo = {testnet: true, base_url: "unknown"};
+
+    async function fetchEnv() {
+        try {
+            const r = await fetch("/api/env");
+            if (!r.ok) return;
+            envInfo = await r.json();
+            renderEnvBanner();
+        } catch (e) { /* silent */ }
+    }
+
+    function renderEnvBanner() {
+        if (envInfo.testnet) {
+            el.envBanner.textContent =
+                `testnet · ${envInfo.base_url} — ордери не йдуть на реальний акаунт`;
+            el.envBanner.className = "env-banner testnet";
+        } else {
+            el.envBanner.textContent =
+                `⚠ LIVE MODE — REAL MONEY · ${envInfo.base_url} ⚠`;
+            el.envBanner.className = "env-banner live";
+        }
+    }
 
     const LS_KEY = "v340rk.slots";
     const state = {
@@ -201,11 +224,24 @@
         if (!slot) return;
         const sizingMode = slot.nodes.sizingMode.value;
         const sizingVal = parseFloat(slot.nodes.sizingValue.value);
+        const slotMode = slot.nodes.mode.value;
+
+        // Live mode + slot.mode=live → confirm dialog (real money)
+        if (!envInfo.testnet && slotMode === "live") {
+            const ok = window.confirm(
+                `⚠ LIVE MODE\n\n` +
+                `Ти збираєшся запустити ${sym} на REAL Binance Futures.\n` +
+                `Sizing: ${sizingMode} = ${sizingVal}\n` +
+                `Leverage: ${slot.nodes.leverage.value}x\n\n` +
+                `Це РЕАЛЬНІ ГРОШІ. Натисни OK щоб продовжити, Cancel — скасувати.`
+            );
+            if (!ok) return;
+        }
 
         const payload = {
             symbol: sym,
             leverage: parseInt(slot.nodes.leverage.value, 10),
-            mode: slot.nodes.mode.value,
+            mode: slotMode,
         };
         if (sizingMode === "margin_pct") {
             if (!(sizingVal > 0 && sizingVal <= 100)) {
@@ -460,6 +496,7 @@
             showError(`Прибрано слоти невалідних пар: ${lost.join(", ")}`);
         }
     });
+    fetchEnv();   // одноразово при старті — env не змінюється
     fetchStatus();
     setInterval(fetchStatus, 1000);
     fetchBalance();

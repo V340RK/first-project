@@ -73,6 +73,7 @@ class DashboardServer:
         symbol_service: BinanceSymbolService | None = None,
         account_service: BinanceAccountService | None = None,
         book_service: BookSnapshotService | None = None,
+        env_info: dict[str, Any] | None = None,
     ) -> None:
         self._config = config
         self._tailer = tailer if tailer is not None else JournalTailer(
@@ -84,6 +85,7 @@ class DashboardServer:
         self._symbol_service = symbol_service
         self._account_service = account_service
         self._book_service = book_service
+        self._env_info = env_info or {"testnet": True, "base_url": "unknown"}
         self._connected_clients: int = 0
 
     @property
@@ -153,6 +155,11 @@ class DashboardServer:
                     "session": asdict(sess) if sess else None,
                 }
             return JSONResponse({"slots": slots})
+
+        @app.get("/api/env")
+        async def env_info() -> JSONResponse:
+            """Чи це testnet чи prod — щоб UI міг показати warning."""
+            return JSONResponse(self._env_info)
 
         @app.get("/api/account/balance")
         async def account_balance() -> JSONResponse:
@@ -341,11 +348,13 @@ def create_app(
     symbol_service: BinanceSymbolService | None = None,
     account_service: BinanceAccountService | None = None,
     book_service: BookSnapshotService | None = None,
+    env_info: dict[str, Any] | None = None,
 ) -> FastAPI:
     """Фабрика для uvicorn. Якщо registry=None — UI буде read-only."""
     server = DashboardServer(
         config, registry=registry, symbol_service=symbol_service,
         account_service=account_service, book_service=book_service,
+        env_info=env_info,
     )
     return server.build_app()
 

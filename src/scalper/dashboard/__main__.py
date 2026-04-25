@@ -88,9 +88,11 @@ def main() -> None:
     else:
         print("WARNING: BINANCE_API_KEY/SECRET відсутні — баланс не доступний")
 
+    env_info = {"testnet": testnet, "base_url": base_url}
     app = create_app(
         config, registry=registry, symbol_service=symbol_service,
         account_service=account_service, book_service=book_service,
+        env_info=env_info,
     )
     uvicorn.run(app, host=config.host, port=config.port, log_level=args.log_level.lower())
 
