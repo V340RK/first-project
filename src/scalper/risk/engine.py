@@ -163,7 +163,11 @@ class RiskEngine:
                 snapshot=snapshot,
             )
 
-        if risk_usd > self._config.risk_per_trade_usd_abs * 1.1:
+        # Risk overshoot перевіряємо тільки в R-based mode. У margin-mode
+        # real R-ризик плаваючий за дизайном (залежить від stop_distance),
+        # тому не reject'имо позицію через нього.
+        if (self._config.margin_per_trade_pct is None
+                and risk_usd > self._config.risk_per_trade_usd_abs * 1.1):
             return RiskDecision(
                 plan=None, reason=f"risk_overshoot ({risk_usd:.2f})", snapshot=snapshot,
             )
@@ -317,9 +321,19 @@ class RiskEngine:
         self, plan: TradePlan, equity: float, stop_distance_price: float,
     ) -> tuple[float, float]:
         c = self._config
-        r_usd = min(c.risk_per_trade_usd_abs, equity * c.risk_per_trade_pct)
         effective_distance = stop_distance_price + self._buffer_price()
-        qty = r_usd / effective_distance
+
+        if c.margin_per_trade_pct is not None and c.margin_per_trade_pct > 0:
+            # Margin-based sizing: фіксована частка balance як margin.
+            # Notional = margin * leverage. R-ризик плаваючий (залежить від stop).
+            margin_usd = equity * c.margin_per_trade_pct / 100.0
+            notional = margin_usd * c.leverage
+            qty = notional / plan.entry_price
+        else:
+            # R-based sizing (default): qty з заданого ризику.
+            r_usd = min(c.risk_per_trade_usd_abs, equity * c.risk_per_trade_pct)
+            qty = r_usd / effective_distance
+
         qty = self._round_step(qty, c.fallback_step_size)
         real_risk = qty * effective_distance
         return qty, real_risk

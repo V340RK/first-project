@@ -18,6 +18,13 @@ class RiskConfig(BaseModel):
     leverage: int = Field(default=5, ge=1, le=125)
     max_notional_usage: float = Field(default=0.9, gt=0, le=1.0)
 
+    # === Margin-based sizing (альтернативний режим) ===
+    # Якщо встановлено — RiskEngine ігнорує R-based formula (risk/stop_distance)
+    # і використовує fixed-margin sizing: notional = equity * pct/100 * leverage.
+    # Зручно для трейдерів, що думають у "% balance allocated", не у "% balance to lose".
+    # Реальний R-ризик плаваючий — залежить від того, як setup поставив стоп.
+    margin_per_trade_pct: float | None = Field(default=None, ge=0, le=100)
+
     # === Size fallbacks (поки немає ExchangeInfo) ===
     fallback_tick_size: float = Field(default=0.1, gt=0)
     fallback_step_size: float = Field(default=0.001, gt=0)

@@ -33,7 +33,8 @@
             data.push({
                 symbol: sym,
                 leverage: slot.nodes.leverage.value,
-                risk: slot.nodes.risk.value,
+                sizingMode: slot.nodes.sizingMode.value,
+                sizingValue: slot.nodes.sizingValue.value,
                 mode: slot.nodes.mode.value,
             });
         });
@@ -113,7 +114,9 @@
             remove: card.querySelector(".slot-remove"),
             leverage: card.querySelector(".slot-leverage"),
             leverageVal: card.querySelector(".leverage-val"),
-            risk: card.querySelector(".slot-risk"),
+            sizingMode: card.querySelector(".slot-sizing-mode"),
+            sizingValue: card.querySelector(".slot-sizing-value"),
+            sizingHint: card.querySelector(".sizing-hint"),
             mode: card.querySelector(".slot-mode"),
             startBtn: card.querySelector(".slot-start"),
             stopBtn: card.querySelector(".slot-stop"),
@@ -129,18 +132,33 @@
 
         if (prefill) {
             if (prefill.leverage) nodes.leverage.value = prefill.leverage;
-            if (prefill.risk) nodes.risk.value = prefill.risk;
+            if (prefill.sizingMode) nodes.sizingMode.value = prefill.sizingMode;
+            if (prefill.sizingValue) nodes.sizingValue.value = prefill.sizingValue;
             if (prefill.mode) nodes.mode.value = prefill.mode;
         }
         nodes.leverageVal.textContent = `${nodes.leverage.value}x`;
 
+        const updateSizingHint = () => {
+            if (nodes.sizingMode.value === "margin_pct") {
+                nodes.sizingHint.textContent = `% від балансу як margin. Notional = margin × ${nodes.leverage.value}x плече.`;
+            } else {
+                nodes.sizingHint.textContent = "Скільки втратиш якщо стоп спрацює (R-based).";
+            }
+        };
+        updateSizingHint();
+
         // Wire up events
         nodes.leverage.addEventListener("input", () => {
             nodes.leverageVal.textContent = `${nodes.leverage.value}x`;
+            updateSizingHint();
+            saveSlots();
+        });
+        nodes.sizingMode.addEventListener("change", () => {
+            updateSizingHint();
             saveSlots();
         });
         ["change", "input"].forEach(ev => {
-            [nodes.risk, nodes.mode].forEach(n => {
+            [nodes.sizingValue, nodes.mode].forEach(n => {
                 n.addEventListener(ev, saveSlots);
             });
         });
@@ -172,14 +190,23 @@
     async function startSlot(sym) {
         const slot = state.slots.get(sym);
         if (!slot) return;
+        const sizingMode = slot.nodes.sizingMode.value;
+        const sizingVal = parseFloat(slot.nodes.sizingValue.value);
+
         const payload = {
             symbol: sym,
             leverage: parseInt(slot.nodes.leverage.value, 10),
-            risk_per_trade_usd: parseFloat(slot.nodes.risk.value),
             mode: slot.nodes.mode.value,
-            // equity_usd НЕ передається — backend бере з реального API
         };
-        if (!(payload.risk_per_trade_usd > 0)) { showError(`${sym}: ризик > 0`); return; }
+        if (sizingMode === "margin_pct") {
+            if (!(sizingVal > 0 && sizingVal <= 100)) {
+                showError(`${sym}: % балансу має бути 0..100`); return;
+            }
+            payload.margin_per_trade_pct = sizingVal;
+        } else {
+            if (!(sizingVal > 0)) { showError(`${sym}: ризик USDT > 0`); return; }
+            payload.risk_per_trade_usd = sizingVal;
+        }
         if (lastBalance && lastBalance.available_balance <= 0) {
             showError(`${sym}: баланс акаунту = 0; пополни перед стартом`);
             return;
@@ -234,7 +261,7 @@
         slot.nodes.stopBtn.disabled = !running;
         slot.nodes.remove.disabled = running;
         // Заборона змінювати конфіг під час роботи (для прозорості)
-        [slot.nodes.leverage, slot.nodes.risk, slot.nodes.mode]
+        [slot.nodes.leverage, slot.nodes.sizingMode, slot.nodes.sizingValue, slot.nodes.mode]
             .forEach(n => { n.disabled = running; });
 
         if (session) {

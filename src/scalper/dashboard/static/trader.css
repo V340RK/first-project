@@ -368,6 +368,12 @@ body {
     margin: 4px 0;
 }
 
+.sizing-group {
+    display: grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap: 6px;
+}
+
 .slot-actions {
     display: flex;
     gap: 8px;

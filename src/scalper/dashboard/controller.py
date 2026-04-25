@@ -25,15 +25,22 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class BotRunParams:
-    """Параметри одного "сесійного" запуску бота з UI — одна пара, один процес."""
+    """Параметри одного "сесійного" запуску бота з UI — одна пара, один процес.
+
+    Sizing: ОДИН з двох режимів задається:
+      sizing_mode='risk_usd'  → risk_per_trade_usd: $X втрати на угоду (R-based)
+      sizing_mode='margin_pct' → margin_per_trade_pct: % balance як margin (notional = margin*leverage)
+    """
 
     symbol: str
     leverage: int
-    risk_per_trade_usd: float
+    risk_per_trade_usd: float                 # використовується якщо sizing_mode=risk_usd
     equity_usd: float
-    mode: str = "live"                    # "live" | "paper"
+    mode: str = "live"
     score_threshold_override: float | None = None
-    relaxed_regime: bool = False              # для testnet/paper — знімає LOW_LIQ блок
+    relaxed_regime: bool = False
+    sizing_mode: str = "risk_usd"             # "risk_usd" | "margin_pct"
+    margin_per_trade_pct: float | None = None   # використовується якщо sizing_mode=margin_pct
 
 
 @dataclass
@@ -165,14 +172,18 @@ class BotController:
     # === Internal ===
 
     def _write_runtime_config(self, params: BotRunParams) -> None:
+        risk_section: dict = {}
+        if params.sizing_mode == "margin_pct" and params.margin_per_trade_pct is not None:
+            risk_section["margin_per_trade_pct"] = params.margin_per_trade_pct
+        else:
+            risk_section["risk_per_trade_usd_abs"] = params.risk_per_trade_usd
+
         config_dict: dict = {
             "mode": params.mode,
             "symbols": [params.symbol],
             "equity_usd": params.equity_usd,
             "leverage": params.leverage,
-            "risk": {
-                "risk_per_trade_usd_abs": params.risk_per_trade_usd,
-            },
+            "risk": risk_section,
         }
         decision_section: dict = {}
         if params.score_threshold_override is not None:

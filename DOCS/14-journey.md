@@ -216,6 +216,25 @@ risk:
 
 **Підтвердження безпеки:** на тонкому testnet ордер часто не filled взагалі — reconcile тепер коректно бачить `positionRisk=0` і логує `"entry expired without fill — dropping local position"` без orphan'ів і без emergency_close циклу.
 
+### Альтернативний sizing: «% від балансу як margin»
+
+Користувач: «Хочу налаштовувати у відсотках. На балансі 1000, ставлю 10% — угода відкривається на 100$.»
+
+Це **margin-based sizing** (фіксована частка balance як margin), на відміну від default R-based (qty з допустимого збитку при стопі). Notional = `equity * pct/100 * leverage`. R-ризик плаваючий — залежить від того, як setup виставив stop.
+
+| Поле | Значення |
+|---|---|
+| `RiskConfig.margin_per_trade_pct: float \| None` | Якщо встановлено → margin sizing активний; інакше — R-based |
+| `RiskEngine._compute_size` | Branch на margin-mode: `qty = (equity * pct/100 * leverage) / entry_price` |
+| `risk_overshoot` check | Skip-iться у margin-mode (плаваючий R за дизайном) |
+| `BotRunParams.sizing_mode` | `'risk_usd'` (default) \| `'margin_pct'` |
+| API `POST /api/bot/start` | Приймає `risk_per_trade_usd: float` АБО `margin_per_trade_pct: float`; визначає sizing_mode автоматично |
+| UI слот | Dropdown `Ризик USDT` / `% балансу (margin)` + єдине поле value; динамічний hint під полем |
+
+Notional cap (`equity * leverage * 0.9`) залишається активним для обох modes — захист від помилок налаштування.
+
+Тести: +4 у `tests/risk/test_margin_sizing.py` — margin-mode фіксує qty незалежно від stop_distance, R-mode ignoring margin field, notional cap працює і в margin-mode, default behavior збережено.
+
 ---
 
 ## Що лишилось до prod

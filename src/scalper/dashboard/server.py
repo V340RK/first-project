@@ -39,10 +39,16 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 class StartBotRequest(BaseModel):
-    """Запуск окремого бота на ОДНУ пару. Кілька пар = кілька таких запитів."""
+    """Запуск окремого бота на ОДНУ пару. Кілька пар = кілька таких запитів.
+
+    Sizing: вкажи ОДИН з двох — `risk_per_trade_usd` (R-based) АБО
+    `margin_per_trade_pct` (% від balance як margin для позиції).
+    Якщо обидва — пріоритет у margin_per_trade_pct.
+    """
     symbol: str = Field(min_length=1)
     leverage: int = Field(ge=1, le=125)
-    risk_per_trade_usd: float = Field(gt=0)
+    risk_per_trade_usd: float = Field(default=0, ge=0)
+    margin_per_trade_pct: float | None = Field(default=None, ge=0.01, le=100)
     mode: str = "live"
     score_threshold_override: float | None = None
     # equity_usd НЕ приймається ззовні — береться з реального balance API
@@ -223,9 +229,17 @@ class DashboardServer:
             if score_thr is None and testnet:
                 score_thr = 0.25
 
+            sizing_mode = "margin_pct" if req.margin_per_trade_pct else "risk_usd"
+            if sizing_mode == "risk_usd" and req.risk_per_trade_usd <= 0:
+                raise HTTPException(
+                    422, "потрібно вказати або risk_per_trade_usd>0, або margin_per_trade_pct>0",
+                )
+
             params = BotRunParams(
                 symbol=sym, leverage=req.leverage,
                 risk_per_trade_usd=req.risk_per_trade_usd,
+                margin_per_trade_pct=req.margin_per_trade_pct,
+                sizing_mode=sizing_mode,
                 equity_usd=equity_usd, mode=req.mode,
                 score_threshold_override=score_thr,
                 relaxed_regime=testnet,
