@@ -10,80 +10,23 @@
     <div class="panel">
         <header class="header">
             <div class="title">V340RK</div>
-            <div class="sub">scalper control panel</div>
+            <div class="sub">scalper control panel — кожна пара торгується окремим процесом</div>
         </header>
 
         <section class="card">
-            <label class="label">Пари з Binance Futures USDT-M (<span id="symbols-count">—</span> доступно):</label>
-            <div class="chips-box" id="chips-box">
-                <div class="chips" id="chips"></div>
+            <label class="label">Додати пару (з <span id="symbols-count">—</span> доступних на Binance Futures USDT-M):</label>
+            <div class="chips-box" id="add-pair-box">
                 <input type="text" id="pair-input" autocomplete="off"
                        placeholder="Почни вводити: BTC, ETH, SOL…" />
                 <div class="dropdown hidden" id="symbol-dropdown"></div>
             </div>
-            <div class="hint">Клік по пропозиції або Enter — додає чіп. Backspace на пусте поле — видаляє останній.</div>
+            <div class="hint">Клік по пропозиції або Enter — додає слот для цієї пари.</div>
         </section>
 
-        <section class="card two-col">
-            <div>
-                <label class="label" for="leverage">Плече: <span id="leverage-val">5x</span></label>
-                <input type="range" id="leverage" min="1" max="20" value="5" />
-                <div class="hint">x1 — x125 на Binance. Вище 20 — обережно.</div>
-            </div>
-            <div>
-                <label class="label" for="risk">Ризик на угоду (USDT):</label>
-                <input type="number" id="risk" min="0.01" step="0.01" value="0.50" />
-                <div class="hint">скільки максимум втратите на одному SL.</div>
-            </div>
-        </section>
-
-        <section class="card two-col">
-            <div>
-                <label class="label" for="equity">Баланс акаунту (USDT):</label>
-                <input type="number" id="equity" min="1" step="1" value="100" />
-            </div>
-            <div>
-                <label class="label" for="mode">Режим:</label>
-                <select id="mode">
-                    <option value="paper">paper (без реальних ордерів)</option>
-                    <option value="live" selected>live (реальні ордери)</option>
-                </select>
-            </div>
-        </section>
-
-        <section class="card actions">
-            <button id="start-btn" class="btn btn-primary">▶ START BOT</button>
-            <button id="stop-btn" class="btn btn-danger" disabled>⏸ STOP</button>
-            <div id="bot-state" class="pill pill-stopped">stopped</div>
-        </section>
-
-        <section class="card stats">
-            <h2>Статистика сесії</h2>
-            <div class="stat-grid">
-                <div class="stat">
-                    <div class="stat-label">Угод</div>
-                    <div class="stat-value" id="stat-trades">—</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-label">Час роботи</div>
-                    <div class="stat-value" id="stat-uptime">—</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-label">ПНЛ (R)</div>
-                    <div class="stat-value" id="stat-r">—</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-label">ПНЛ (USDT)</div>
-                    <div class="stat-value" id="stat-usd">—</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-label">Відкрито</div>
-                    <div class="stat-value" id="stat-open">—</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-label">Остання подія</div>
-                    <div class="stat-value" id="stat-last">—</div>
-                </div>
+        <section id="slots-container">
+            <!-- Тут динамічно з'являються slot-картки -->
+            <div class="empty-state" id="empty-state">
+                ще немає жодної пари. Додай першу зверху.
             </div>
         </section>
 
@@ -93,6 +36,53 @@
             <a href="/">→ технічний дашборд (усі події журналу)</a>
         </footer>
     </div>
+
+    <!-- Темплейт slot-картки. Клонуємо при додаванні пари. -->
+    <template id="slot-template">
+        <section class="slot-card" data-symbol="">
+            <header class="slot-header">
+                <h3 class="slot-symbol"></h3>
+                <div class="slot-state pill pill-stopped">stopped</div>
+                <button type="button" class="slot-remove" title="Видалити слот">×</button>
+            </header>
+
+            <div class="slot-config">
+                <div class="form-row">
+                    <label>Плече: <span class="leverage-val">5x</span></label>
+                    <input type="range" class="slot-leverage" min="1" max="20" value="5" />
+                </div>
+                <div class="form-row">
+                    <label>Ризик на угоду (USDT)</label>
+                    <input type="number" class="slot-risk" min="0.01" step="0.01" value="0.50" />
+                </div>
+                <div class="form-row">
+                    <label>Баланс акаунту (USDT)</label>
+                    <input type="number" class="slot-equity" min="1" step="1" value="100" />
+                </div>
+                <div class="form-row">
+                    <label>Режим</label>
+                    <select class="slot-mode">
+                        <option value="paper">paper</option>
+                        <option value="live" selected>live</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="slot-actions">
+                <button type="button" class="btn btn-primary slot-start">▶ START</button>
+                <button type="button" class="btn btn-danger slot-stop" disabled>⏸ STOP</button>
+            </div>
+
+            <div class="slot-stats">
+                <div class="stat"><div class="stat-label">Угод</div><div class="stat-value stat-trades">—</div></div>
+                <div class="stat"><div class="stat-label">Час роботи</div><div class="stat-value stat-uptime">—</div></div>
+                <div class="stat"><div class="stat-label">ПНЛ R</div><div class="stat-value stat-r">—</div></div>
+                <div class="stat"><div class="stat-label">ПНЛ USDT</div><div class="stat-value stat-usd">—</div></div>
+                <div class="stat"><div class="stat-label">Відкрито</div><div class="stat-value stat-open">—</div></div>
+                <div class="stat"><div class="stat-label">Остання подія</div><div class="stat-value stat-last">—</div></div>
+            </div>
+        </section>
+    </template>
 
     <script src="/static/trader.js"></script>
 </body>

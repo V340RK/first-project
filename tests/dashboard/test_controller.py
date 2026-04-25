@@ -67,7 +67,7 @@ def test_initial_status_not_running(controller: BotController) -> None:
 
 def test_start_writes_runtime_config(controller: BotController, tmp_path: Path) -> None:
     params = BotRunParams(
-        symbols=["BTCUSDT", "ETHUSDT"], leverage=10,
+        symbol="BTCUSDT", leverage=10,
         risk_per_trade_usd=0.5, equity_usd=100.0, mode="paper",
     )
     controller.start(params)
@@ -76,7 +76,7 @@ def test_start_writes_runtime_config(controller: BotController, tmp_path: Path) 
         cfg_path = tmp_path / "configs" / "runtime.yaml"
         assert cfg_path.exists()
         cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
-        assert cfg["symbols"] == ["BTCUSDT", "ETHUSDT"]
+        assert cfg["symbols"] == ["BTCUSDT"]
         assert cfg["leverage"] == 10
         assert cfg["risk"]["risk_per_trade_usd_abs"] == 0.5
         assert cfg["equity_usd"] == 100.0
@@ -86,7 +86,7 @@ def test_start_writes_runtime_config(controller: BotController, tmp_path: Path) 
 
 
 def test_stop_kills_subprocess(controller: BotController) -> None:
-    params = BotRunParams(symbols=["BTCUSDT"], leverage=5,
+    params = BotRunParams(symbol="BTCUSDT", leverage=5,
                           risk_per_trade_usd=0.1, equity_usd=50.0)
     controller.start(params)
     assert controller.is_running()
@@ -96,7 +96,7 @@ def test_stop_kills_subprocess(controller: BotController) -> None:
 
 
 def test_double_start_raises(controller: BotController) -> None:
-    params = BotRunParams(symbols=["BTCUSDT"], leverage=5,
+    params = BotRunParams(symbol="BTCUSDT", leverage=5,
                           risk_per_trade_usd=0.1, equity_usd=50.0)
     controller.start(params)
     try:
@@ -108,7 +108,7 @@ def test_double_start_raises(controller: BotController) -> None:
 
 def test_score_threshold_override_in_yaml(controller: BotController, tmp_path: Path) -> None:
     params = BotRunParams(
-        symbols=["BTCUSDT"], leverage=5,
+        symbol="BTCUSDT", leverage=5,
         risk_per_trade_usd=0.1, equity_usd=50.0,
         score_threshold_override=0.3,
     )

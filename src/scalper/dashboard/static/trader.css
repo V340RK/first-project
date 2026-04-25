@@ -211,6 +211,145 @@ body {
     text-align: center;
 }
 
+/* === Slot cards === */
+
+#slots-container {
+    padding: 16px 24px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.empty-state {
+    padding: 32px;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 14px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+}
+
+.slot-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    transition: border-color 0.2s;
+}
+
+.slot-card.is-running {
+    border-color: var(--positive);
+    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.2);
+}
+
+.slot-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.slot-symbol {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.slot-state {
+    margin-left: 0;
+}
+
+.slot-remove {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 6px;
+    border-radius: 4px;
+    transition: all 0.15s;
+}
+
+.slot-remove:hover {
+    color: var(--danger);
+    background: rgba(248, 113, 113, 0.1);
+}
+
+.slot-remove:disabled {
+    opacity: 0.2;
+    cursor: not-allowed;
+}
+
+.slot-config {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px 18px;
+    margin-bottom: 12px;
+}
+
+.form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.form-row label {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.form-row input,
+.form-row select {
+    padding: 6px 8px;
+    font-size: 13px;
+}
+
+.slot-config input[type="range"] {
+    margin: 4px 0;
+}
+
+.slot-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.slot-actions .btn {
+    flex: 0;
+    padding: 6px 14px;
+    font-size: 13px;
+}
+
+.slot-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.slot-stats .stat {
+    padding: 8px;
+}
+
+.slot-stats .stat-label {
+    font-size: 10px;
+}
+
+.slot-stats .stat-value {
+    font-size: 16px;
+}
+
+@media (max-width: 600px) {
+    .slot-config { grid-template-columns: 1fr; }
+    .slot-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
 .two-col {
     display: grid;
     grid-template-columns: 1fr 1fr;

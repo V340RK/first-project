@@ -12,7 +12,7 @@ from pathlib import Path
 import uvicorn
 
 from scalper.dashboard.config import DashboardConfig
-from scalper.dashboard.controller import BotController
+from scalper.dashboard.controller import BotRegistry
 from scalper.dashboard.server import create_app
 from scalper.dashboard.symbols import BinanceSymbolService
 
@@ -26,8 +26,8 @@ def main() -> None:
     parser.add_argument("--poll-interval-ms", type=int, default=150)
     parser.add_argument("--backfill-lines", type=int, default=200)
     parser.add_argument("--log-level", type=str, default="info")
-    parser.add_argument("--runtime-config", type=Path, default=Path("configs/runtime.yaml"),
-                        help="Куди писати runtime config для запусків з UI")
+    parser.add_argument("--runtime-configs-dir", type=Path, default=Path("configs"),
+                        help="Папка для runtime_{SYMBOL}.yaml — по одному на пару")
     parser.add_argument("--no-controller", action="store_true",
                         help="Read-only режим — UI без кнопок старт/стоп")
     parser.add_argument("--binance-base-url", type=str, default=None,
@@ -49,11 +49,11 @@ def main() -> None:
     )
     config.journal_dir.mkdir(parents=True, exist_ok=True)
 
-    controller = None
+    registry = None
     if not args.no_controller:
-        controller = BotController(
+        registry = BotRegistry(
             project_root=Path.cwd(),
-            runtime_config_path=args.runtime_config,
+            runtime_configs_dir=args.runtime_configs_dir,
         )
 
     # SymbolService: визначаємо base_url з flags або .env
@@ -69,7 +69,7 @@ def main() -> None:
         )
     symbol_service = BinanceSymbolService(base_url)
 
-    app = create_app(config, controller=controller, symbol_service=symbol_service)
+    app = create_app(config, registry=registry, symbol_service=symbol_service)
     uvicorn.run(app, host=config.host, port=config.port, log_level=args.log_level.lower())
 
 

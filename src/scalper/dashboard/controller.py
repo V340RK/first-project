@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class BotRunParams:
-    """Параметри одного "сесійного" запуску бота з UI."""
+    """Параметри одного "сесійного" запуску бота з UI — одна пара, один процес."""
 
-    symbols: list[str]
+    symbol: str
     leverage: int
     risk_per_trade_usd: float
     equity_usd: float
@@ -145,7 +145,7 @@ class BotController:
     def _write_runtime_config(self, params: BotRunParams) -> None:
         config_dict: dict = {
             "mode": params.mode,
-            "symbols": list(params.symbols),
+            "symbols": [params.symbol],
             "equity_usd": params.equity_usd,
             "leverage": params.leverage,
             "risk": {
@@ -162,4 +162,56 @@ class BotController:
             yaml.safe_dump(config_dict, f, sort_keys=False, allow_unicode=True)
 
 
-__all__ = ["BotController", "BotRunParams", "BotStatus"]
+class BotRegistry:
+    """Тримає по одному BotController на кожен символ.
+
+    Паралельне виконання: кожна пара — окремий процес бота зі своїм
+    runtime-config файлом (`configs/runtime_{SYMBOL}.yaml`). Це дає
+    незалежний старт/стоп/конфіг/статистику для кожної пари.
+    """
+
+    def __init__(
+        self,
+        *,
+        project_root: Path,
+        runtime_configs_dir: Path,
+        python_exe: Path | str | None = None,
+    ) -> None:
+        self._project_root = project_root
+        self._runtime_dir = runtime_configs_dir
+        self._python = python_exe
+        self._controllers: dict[str, BotController] = {}
+
+    def _controller_for(self, symbol: str) -> BotController:
+        sym = symbol.upper()
+        if sym not in self._controllers:
+            self._controllers[sym] = BotController(
+                project_root=self._project_root,
+                runtime_config_path=self._runtime_dir / f"runtime_{sym}.yaml",
+                python_exe=self._python,
+            )
+        return self._controllers[sym]
+
+    def start(self, params: BotRunParams) -> BotStatus:
+        return self._controller_for(params.symbol).start(params)
+
+    def stop(self, symbol: str, *, timeout_sec: float = 10.0) -> BotStatus:
+        return self._controller_for(symbol).stop(timeout_sec=timeout_sec)
+
+    def status(self, symbol: str) -> BotStatus:
+        return self._controller_for(symbol).status()
+
+    def all_statuses(self) -> dict[str, BotStatus]:
+        # Повертаємо тільки ті символи, які колись стартували (щоб не плодити зомбі).
+        return {sym: c.status() for sym, c in self._controllers.items()}
+
+    def stop_all(self, *, timeout_sec: float = 10.0) -> None:
+        for c in self._controllers.values():
+            if c.is_running():
+                try:
+                    c.stop(timeout_sec=timeout_sec)
+                except Exception as e:
+                    logger.warning("stop_all: %s", e)
+
+
+__all__ = ["BotController", "BotRegistry", "BotRunParams", "BotStatus"]

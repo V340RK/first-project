@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 
 from scalper.common import time as _time
 from scalper.dashboard.config import DashboardConfig
-from scalper.dashboard.controller import BotController, BotRunParams
+from scalper.dashboard.controller import BotRegistry, BotRunParams
 from scalper.dashboard.stats import SessionStats
 from scalper.dashboard.symbols import BinanceSymbolService
 from scalper.dashboard.tailer import JournalTailer
@@ -38,22 +38,27 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 class StartBotRequest(BaseModel):
-    symbols: list[str] = Field(min_length=1)
+    """Запуск окремого бота на ОДНУ пару. Кілька пар = кілька таких запитів."""
+    symbol: str = Field(min_length=1)
     leverage: int = Field(ge=1, le=125)
     risk_per_trade_usd: float = Field(gt=0)
     equity_usd: float = Field(gt=0)
-    mode: str = "live"                 # 'live' | 'paper'
+    mode: str = "live"
     score_threshold_override: float | None = None
 
 
+class StopBotRequest(BaseModel):
+    symbol: str = Field(min_length=1)
+
+
 class DashboardServer:
-    """Тримає FastAPI app + фоновий JournalTailer + BotController."""
+    """FastAPI app + JournalTailer + BotRegistry (per-symbol процеси)."""
 
     def __init__(
         self,
         config: DashboardConfig,
         tailer: JournalTailer | None = None,
-        controller: BotController | None = None,
+        registry: BotRegistry | None = None,
         symbol_service: BinanceSymbolService | None = None,
     ) -> None:
         self._config = config
@@ -61,7 +66,7 @@ class DashboardServer:
             journal_dir=config.journal_dir,
             poll_interval_ms=config.poll_interval_ms,
         )
-        self._controller = controller
+        self._registry = registry
         self._stats = SessionStats(self._tailer)
         self._symbol_service = symbol_service
         self._connected_clients: int = 0
@@ -81,9 +86,9 @@ class DashboardServer:
             finally:
                 await self._stats.stop()
                 await self._tailer.stop()
-                if self._controller is not None and self._controller.is_running():
-                    logger.info("Shutting down managed bot subprocess")
-                    self._controller.stop()
+                if self._registry is not None:
+                    logger.info("Shutting down all managed bot subprocesses")
+                    self._registry.stop_all()
                 logger.info("Dashboard tailer stopped")
 
         app = FastAPI(title="Scalper Dashboard", lifespan=lifespan)
@@ -113,16 +118,26 @@ class DashboardServer:
 
         @app.get("/api/bot/status")
         async def bot_status() -> JSONResponse:
-            snap = self._stats.snapshot()
-            ctrl_status = (
-                asdict(self._controller.status()) if self._controller else
-                {"running": False, "pid": None, "started_at_ms": None,
-                 "params": None, "exit_code": None}
+            """Знімок усіх відомих слотів: bot status + session per symbol."""
+            session_snaps = self._stats.snapshot_all()
+            bot_statuses = (
+                self._registry.all_statuses() if self._registry is not None else {}
             )
-            return JSONResponse({
-                "bot": ctrl_status,
-                "session": asdict(snap),
-            })
+
+            slots: dict[str, dict] = {}
+            all_symbols = set(session_snaps.keys()) | set(bot_statuses.keys())
+            for sym in all_symbols:
+                bot = bot_statuses.get(sym)
+                sess = session_snaps.get(sym)
+                slots[sym] = {
+                    "bot": (
+                        asdict(bot) if bot else
+                        {"running": False, "pid": None, "started_at_ms": None,
+                         "params": None, "exit_code": None}
+                    ),
+                    "session": asdict(sess) if sess else None,
+                }
+            return JSONResponse({"slots": slots})
 
         @app.get("/api/symbols")
         async def list_symbols() -> JSONResponse:
@@ -140,43 +155,38 @@ class DashboardServer:
 
         @app.post("/api/bot/start")
         async def bot_start(req: StartBotRequest) -> JSONResponse:
-            if self._controller is None:
-                raise HTTPException(503, "bot controller not configured")
-            if self._controller.is_running():
-                raise HTTPException(409, "bot already running")
+            if self._registry is None:
+                raise HTTPException(503, "bot registry not configured")
 
-            # Валідація символів — якщо SymbolService доступний, всі мають бути в TRADING.
+            sym = req.symbol.upper()
+            if self._registry.status(sym).running:
+                raise HTTPException(409, f"бот для {sym} вже запущений")
+
             if self._symbol_service is not None:
                 try:
-                    available = {s.symbol for s in await self._symbol_service.list_symbols()}
+                    valid = await self._symbol_service.is_valid(sym)
                 except Exception as e:
-                    raise HTTPException(502, f"cannot validate symbols: {e}") from e
-                requested = [s.upper() for s in req.symbols]
-                unknown = [s for s in requested if s not in available]
-                if unknown:
+                    raise HTTPException(502, f"cannot validate symbol: {e}") from e
+                if not valid:
                     raise HTTPException(
-                        422, f"невідомі пари на Binance: {', '.join(unknown)}",
+                        422, f"невідома пара на Binance: {sym}",
                     )
-                # Нормалізуємо до UPPERCASE
-                normalized_symbols = requested
-            else:
-                normalized_symbols = [s.upper() for s in req.symbols]
 
             params = BotRunParams(
-                symbols=normalized_symbols, leverage=req.leverage,
+                symbol=sym, leverage=req.leverage,
                 risk_per_trade_usd=req.risk_per_trade_usd,
                 equity_usd=req.equity_usd, mode=req.mode,
                 score_threshold_override=req.score_threshold_override,
             )
-            self._stats.reset()
-            status = self._controller.start(params)
+            self._stats.reset(sym)
+            status = self._registry.start(params)
             return JSONResponse(asdict(status))
 
         @app.post("/api/bot/stop")
-        async def bot_stop() -> JSONResponse:
-            if self._controller is None:
-                raise HTTPException(503, "bot controller not configured")
-            status = self._controller.stop()
+        async def bot_stop(req: StopBotRequest) -> JSONResponse:
+            if self._registry is None:
+                raise HTTPException(503, "bot registry not configured")
+            status = self._registry.stop(req.symbol)
             return JSONResponse(asdict(status))
 
         @app.websocket("/ws/events")
@@ -236,11 +246,11 @@ class DashboardServer:
 
 def create_app(
     config: DashboardConfig,
-    controller: BotController | None = None,
+    registry: BotRegistry | None = None,
     symbol_service: BinanceSymbolService | None = None,
 ) -> FastAPI:
-    """Фабрика для uvicorn. Якщо controller=None — UI буде read-only."""
-    server = DashboardServer(config, controller=controller, symbol_service=symbol_service)
+    """Фабрика для uvicorn. Якщо registry=None — UI буде read-only."""
+    server = DashboardServer(config, registry=registry, symbol_service=symbol_service)
     return server.build_app()
 
 

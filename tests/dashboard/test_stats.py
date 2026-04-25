@@ -18,10 +18,12 @@ def _write_journal(path: Path, events: list[dict]) -> None:
 
 
 @pytest.mark.asyncio
-async def test_counts_trades_and_pnl_from_backfill(tmp_path: Path) -> None:
+async def test_counts_trades_and_pnl_per_symbol(tmp_path: Path) -> None:
+    """Дві пари торгуються паралельно — статистика розділена."""
     from datetime import date
     jfile = tmp_path / f"{date.today().isoformat()}.jsonl"
     events = [
+        # BTC сесія
         {"seq": 1, "timestamp_ms": 1000, "kind": "startup",
          "payload": {"symbols": ["BTCUSDT"]}},
         {"seq": 2, "timestamp_ms": 2000, "kind": "position_opened",
@@ -30,12 +32,15 @@ async def test_counts_trades_and_pnl_from_backfill(tmp_path: Path) -> None:
          "symbol": "BTCUSDT", "payload": {}},
         {"seq": 4, "timestamp_ms": 3001, "kind": "trade_outcome",
          "symbol": "BTCUSDT", "payload": {"realized_r": 1.2, "realized_usd": 1.20}},
-        {"seq": 5, "timestamp_ms": 4000, "kind": "position_opened",
-         "symbol": "BTCUSDT", "payload": {}},
-        {"seq": 6, "timestamp_ms": 5000, "kind": "position_closed",
-         "symbol": "BTCUSDT", "payload": {}},
-        {"seq": 7, "timestamp_ms": 5001, "kind": "trade_outcome",
-         "symbol": "BTCUSDT", "payload": {"realized_r": -0.5, "realized_usd": -0.50}},
+        # ETH сесія
+        {"seq": 5, "timestamp_ms": 4000, "kind": "startup",
+         "payload": {"symbols": ["ETHUSDT"]}},
+        {"seq": 6, "timestamp_ms": 5000, "kind": "position_opened",
+         "symbol": "ETHUSDT", "payload": {}},
+        {"seq": 7, "timestamp_ms": 6000, "kind": "position_closed",
+         "symbol": "ETHUSDT", "payload": {}},
+        {"seq": 8, "timestamp_ms": 6001, "kind": "trade_outcome",
+         "symbol": "ETHUSDT", "payload": {"realized_r": -0.5, "realized_usd": -0.50}},
     ]
     _write_journal(jfile, events)
 
@@ -44,59 +49,84 @@ async def test_counts_trades_and_pnl_from_backfill(tmp_path: Path) -> None:
     try:
         stats = SessionStats(tailer)
         await stats.start()
-        snap = stats.snapshot()
-        assert snap.session_started_ms == 1000
-        assert snap.trades_closed == 2
-        assert snap.open_positions == 0
-        assert snap.realized_r == pytest.approx(0.7)
-        assert snap.realized_usd == pytest.approx(0.70)
-        assert snap.last_event_ms == 5001
+        all_snaps = stats.snapshot_all()
+        assert set(all_snaps.keys()) == {"BTCUSDT", "ETHUSDT"}
+
+        btc = all_snaps["BTCUSDT"]
+        assert btc.session_started_ms == 1000
+        assert btc.trades_closed == 1
+        assert btc.realized_r == pytest.approx(1.2)
+        assert btc.realized_usd == pytest.approx(1.20)
+
+        eth = all_snaps["ETHUSDT"]
+        assert eth.session_started_ms == 4000
+        assert eth.trades_closed == 1
+        assert eth.realized_r == pytest.approx(-0.5)
         await stats.stop()
     finally:
         await tailer.stop()
 
 
 @pytest.mark.asyncio
-async def test_reset_clears_counters(tmp_path: Path) -> None:
+async def test_reset_clears_counters_for_specific_symbol(tmp_path: Path) -> None:
     tailer = JournalTailer(journal_dir=tmp_path, poll_interval_ms=50)
     await tailer.start()
     try:
         stats = SessionStats(tailer)
-        stats._trades_closed = 10   # type: ignore[attr-defined]
-        stats._realized_r = 3.5     # type: ignore[attr-defined]
-        stats.reset()
-        snap = stats.snapshot()
+        s = stats._get_or_create("BTCUSDT")   # type: ignore[attr-defined]
+        s.trades_closed = 10
+        s.realized_r = 3.5
+        # ETH untouched
+        e = stats._get_or_create("ETHUSDT")   # type: ignore[attr-defined]
+        e.trades_closed = 7
+
+        stats.reset("BTCUSDT")
+        snap = stats.snapshot("BTCUSDT")
+        assert snap is not None
         assert snap.trades_closed == 0
-        assert snap.realized_r == 0.0
+        # ETH не зачеплений
+        assert stats.snapshot("ETHUSDT").trades_closed == 7
     finally:
         await tailer.stop()
 
 
 @pytest.mark.asyncio
-async def test_startup_event_resets_counters_for_new_session(tmp_path: Path) -> None:
-    """Новий startup event = нова сесія → counters обнуляються."""
+async def test_startup_event_resets_session_for_that_symbol(tmp_path: Path) -> None:
+    """Повторний startup того ж символу — нова сесія, лічильники обнулені."""
     from datetime import date
     jfile = tmp_path / f"{date.today().isoformat()}.jsonl"
     _write_journal(jfile, [
         {"seq": 1, "timestamp_ms": 1000, "kind": "startup",
          "payload": {"symbols": ["BTCUSDT"]}},
         {"seq": 2, "timestamp_ms": 2000, "kind": "trade_outcome",
-         "payload": {"realized_r": 2.0}},
-        # Новий старт — скидає сесію
+         "symbol": "BTCUSDT", "payload": {"realized_r": 2.0}},
+        # Повторний старт BTC = нова сесія для BTC
         {"seq": 3, "timestamp_ms": 10_000, "kind": "startup",
-         "payload": {"symbols": ["ETHUSDT"]}},
+         "payload": {"symbols": ["BTCUSDT"]}},
         {"seq": 4, "timestamp_ms": 11_000, "kind": "trade_outcome",
-         "payload": {"realized_r": 0.5}},
+         "symbol": "BTCUSDT", "payload": {"realized_r": 0.5}},
     ])
     tailer = JournalTailer(journal_dir=tmp_path, poll_interval_ms=50)
     await tailer.start()
     try:
         stats = SessionStats(tailer)
         await stats.start()
-        snap = stats.snapshot()
-        # Залишився лише трейд з другої сесії
+        snap = stats.snapshot("BTCUSDT")
         assert snap.session_started_ms == 10_000
         assert snap.realized_r == pytest.approx(0.5)
+        await stats.stop()
+    finally:
+        await tailer.stop()
+
+
+@pytest.mark.asyncio
+async def test_unknown_symbol_returns_none(tmp_path: Path) -> None:
+    tailer = JournalTailer(journal_dir=tmp_path, poll_interval_ms=50)
+    await tailer.start()
+    try:
+        stats = SessionStats(tailer)
+        await stats.start()
+        assert stats.snapshot("UNKNOWN") is None
         await stats.stop()
     finally:
         await tailer.stop()

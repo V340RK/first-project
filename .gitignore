@@ -25,6 +25,7 @@ journal/*.jsonl*
 configs/settings.yaml
 configs/secrets.yaml
 configs/runtime.yaml
+configs/runtime_*.yaml
 
 .claude/settings.local.json
 tmp_journal/
