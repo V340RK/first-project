@@ -338,97 +338,11 @@ body {
     cursor: not-allowed;
 }
 
-.slot-body {
-    display: grid;
-    grid-template-columns: 1fr 240px;
-    gap: 16px;
-    margin-bottom: 12px;
-}
-
 .slot-config {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 12px 18px;
-}
-
-.mini-book {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 10px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
-}
-
-.mini-book-spread {
-    text-align: center;
-    color: var(--text-dim);
-    margin-bottom: 6px;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.mini-book-spread .spread-val {
-    color: var(--accent);
-    font-weight: 600;
-}
-
-.book-table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-.book-table th {
-    font-size: 9px;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    text-align: left;
-    padding: 2px 4px;
-    font-weight: 500;
-}
-
-.book-table th.num,
-.book-table td.num {
-    text-align: right;
-}
-
-.book-table td {
-    padding: 1px 4px;
-    font-variant-numeric: tabular-nums;
-    position: relative;
-}
-
-.book-table .price-ask { color: var(--negative); }
-.book-table .price-bid { color: var(--positive); }
-.book-table .qty { color: var(--text); }
-
-/* Гліф-бар як background для visualizing розміру */
-.book-table .row-bg {
-    position: absolute;
-    top: 0; bottom: 0;
-    right: 0;
-    pointer-events: none;
-}
-.book-table .row-ask-bg { background: rgba(248, 113, 113, 0.10); }
-.book-table .row-bid-bg { background: rgba(74, 222, 128, 0.10); }
-.book-table tr { position: relative; }
-
-.book-divider {
-    height: 1px;
-    background: var(--border);
-    margin: 4px 0;
-}
-
-.book-meta {
-    text-align: center;
-    margin-top: 6px;
-    font-size: 9px;
-}
-
-@media (max-width: 720px) {
-    .slot-body { grid-template-columns: 1fr; }
-    .mini-book { max-width: 100%; }
+    margin-bottom: 12px;
 }
 
 .form-row {

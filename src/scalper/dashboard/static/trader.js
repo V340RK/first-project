@@ -132,12 +132,6 @@
                 open: card.querySelector(".stat-open"),
                 last: card.querySelector(".stat-last"),
             },
-            book: {
-                spread: card.querySelector(".spread-val"),
-                asks: card.querySelector(".book-asks"),
-                bids: card.querySelector(".book-bids"),
-                meta: card.querySelector(".book-meta"),
-            },
         };
 
         if (prefill) {
@@ -179,13 +173,7 @@
         nodes.remove.addEventListener("click", () => removeSlot(sym));
 
         el.slotsContainer.appendChild(card);
-        state.slots.set(sym, {nodes, running: false, bookTimer: null});
-
-        // Стартуємо polling стакана
-        const slot = state.slots.get(sym);
-        const tick = () => fetchBook(sym).catch(() => {});
-        tick();
-        slot.bookTimer = setInterval(tick, 2000);
+        state.slots.set(sym, {nodes, running: false});
 
         el.emptyState.classList.add("hidden");
         saveSlots();
@@ -199,80 +187,10 @@
             showError(`Спочатку зупини бота для ${sym}`);
             return;
         }
-        if (slot.bookTimer) clearInterval(slot.bookTimer);
         slot.nodes.card.remove();
         state.slots.delete(sym);
         if (state.slots.size === 0) el.emptyState.classList.remove("hidden");
         saveSlots();
-    }
-
-    // === Mini-book (orderbook widget) ===
-    async function fetchBook(sym) {
-        const slot = state.slots.get(sym);
-        if (!slot) return;
-        try {
-            const resp = await fetch(`/api/orderbook/${sym}?depth=10`);
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            const data = await resp.json();
-            renderBook(slot, data);
-        } catch (e) {
-            slot.nodes.book.meta.textContent = `немає даних: ${e.message}`;
-        }
-    }
-
-    function formatPrice(p) {
-        if (p >= 1000) return p.toFixed(1);
-        if (p >= 1) return p.toFixed(3);
-        if (p >= 0.01) return p.toFixed(5);
-        return p.toFixed(7);
-    }
-
-    function formatQty(q) {
-        if (q >= 10000) return (q / 1000).toFixed(1) + "k";
-        if (q >= 100) return q.toFixed(1);
-        if (q >= 1) return q.toFixed(3);
-        return q.toFixed(4);
-    }
-
-    function renderBook(slot, data) {
-        const N = 5;   // показуємо top-5
-        const asks = (data.asks || []).slice(0, N);
-        const bids = (data.bids || []).slice(0, N);
-        if (asks.length === 0 || bids.length === 0) {
-            slot.nodes.book.meta.textContent = "пуста книжка";
-            return;
-        }
-        const bestAsk = asks[0][0];
-        const bestBid = bids[0][0];
-        const spread = bestAsk - bestBid;
-        const spreadPct = (spread / bestBid) * 100;
-        slot.nodes.book.spread.textContent =
-            `${formatPrice(spread)}  (${spreadPct.toFixed(3)}%)`;
-
-        // Bar нормалізація — макс qty з обох сторін
-        const allQtys = [...asks.map(a => a[1]), ...bids.map(b => b[1])];
-        const maxQty = Math.max(...allQtys, 0.0001);
-
-        const renderRow = (level, kind) => {
-            const [price, qty] = level;
-            const pct = (qty / maxQty) * 100;
-            const bgClass = kind === "ask" ? "row-ask-bg" : "row-bid-bg";
-            const priceCls = kind === "ask" ? "price-ask" : "price-bid";
-            return `<tr>
-                <td><div class="row-bg ${bgClass}" style="width:${pct.toFixed(1)}%"></div></td>
-                <td class="num ${priceCls}">${formatPrice(price)}</td>
-                <td class="num qty">${formatQty(qty)}</td>
-            </tr>`;
-        };
-
-        // Asks: показуємо у зворотному порядку (від далеких до best)
-        slot.nodes.book.asks.innerHTML = asks.slice().reverse()
-            .map(l => renderRow(l, "ask")).join("");
-        slot.nodes.book.bids.innerHTML = bids.map(l => renderRow(l, "bid")).join("");
-
-        const ts = new Date(data.fetched_at_ms || Date.now());
-        slot.nodes.book.meta.textContent =
-            `top-${N}, оновлено ${ts.toLocaleTimeString()}`;
     }
 
     async function startSlot(sym) {
