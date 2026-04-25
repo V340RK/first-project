@@ -114,9 +114,10 @@ class DecisionEngine:
         rs = self._regime.get_regime(cand.symbol)  # type: ignore[attr-defined]
         if rs.regime in (Regime.DISABLED, Regime.NEWS_RISK):
             return f"regime_blocks_trading:{rs.regime.value}"
-        allowed = self._config.regime_allow_map.get(rs.regime, set())
-        if cand.setup_type not in allowed:
-            return f"setup_blocked_in_regime:{rs.regime.value}"
+        if not self._config.relaxed_regime:
+            allowed = self._config.regime_allow_map.get(rs.regime, set())
+            if cand.setup_type not in allowed:
+                return f"setup_blocked_in_regime:{rs.regime.value}"
 
         if self._pos is not None:
             try:

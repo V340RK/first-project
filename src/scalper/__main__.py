@@ -19,6 +19,7 @@ from scalper.book.engine import OrderBookEngine
 from scalper.config import AppConfig, load_config
 from scalper.decision.engine import DecisionEngine
 from scalper.execution import BinanceOrderTransport, ExecutionEngine
+from scalper.execution.types import SymbolFilters as ExecSymbolFilters
 from scalper.expectancy import ExpectancyTracker
 from scalper.features.engine import FeatureEngine
 from scalper.gateway.gateway import MarketDataGateway
@@ -108,6 +109,50 @@ async def run(cfg: AppConfig) -> None:
         pass   # Windows: signals обмежені; stop_event може спрацьовувати ззовні
 
     await orchestrator.start(cfg.symbols)
+
+    # CRITICAL: реєструємо symbol filters в execution. Без цього place_order
+    # реджектиться як "no_symbol_filters" → position.open() повертає False
+    # → жодних трейдів. ExchangeInfo вже завантажений під час gateway.start().
+    for sym in cfg.symbols:
+        try:
+            gw_filt = gateway.get_symbol_filters(sym)
+        except Exception as e:
+            logger.error("symbol filters not available for %s: %s", sym, e)
+            continue
+        execution.register_symbol(ExecSymbolFilters(
+            symbol=sym,
+            tick_size=gw_filt.tick_size, step_size=gw_filt.step_size,
+            min_qty=gw_filt.min_qty, max_qty=gw_filt.max_qty,
+            min_notional=gw_filt.min_notional,
+        ))
+        logger.info("filters registered: %s tick=%g step=%g min_qty=%g min_notional=%g",
+                    sym, gw_filt.tick_size, gw_filt.step_size,
+                    gw_filt.min_qty, gw_filt.min_notional)
+
+    # Paper mode: симулятор фіксує ордери на основі поточного book → треба
+    # годувати його book-ticker подіями з gateway, інакше fill-у не буде.
+    if cfg.mode == "paper" and isinstance(execution, SimulatedExecutionEngine):
+        async def _feed_book(bt) -> None:   # type: ignore[no-untyped-def]
+            try:
+                execution.update_book(
+                    bt.symbol, bid=bt.best_bid, ask=bt.best_ask,
+                    last_trade_price=(bt.best_bid + bt.best_ask) / 2,
+                    ts_ms=bt.timestamp_ms,
+                )
+            except Exception as e:
+                logger.debug("update_book failed for %s: %s", bt.symbol, e)
+        gateway.on_book_ticker(_feed_book)
+        # А також on_clock_tick треба — для resolving pending LIMIT/STOP
+        async def _tick_pending(trade) -> None:   # type: ignore[no-untyped-def]
+            try:
+                execution.update_book(
+                    trade.symbol, bid=trade.price, ask=trade.price,
+                    last_trade_price=trade.price, ts_ms=trade.timestamp_ms,
+                )
+                await execution.on_clock_tick(trade.timestamp_ms)
+            except Exception as e:
+                logger.debug("sim tick failed for %s: %s", trade.symbol, e)
+        gateway.on_agg_trade(_tick_pending)
 
     # Встановити leverage для кожного символу (тільки в live mode — paper не
     # шле REST ордери, та й leverage не потрібен для SimulatedExecutionEngine).

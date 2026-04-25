@@ -209,6 +209,7 @@ def test_trade_count_cap() -> None:
     for i in range(2):
         p = re.evaluate(_plan(), equity_usd=10_000).plan
         assert p is not None
+        re.on_position_opened(p)   # Orchestrator робить це після успішного open()
         re.on_position_closed(_outcome(p, realized_r=0.5, trade_id=f"t{i}"))
     dec = re.evaluate(_plan(), equity_usd=10_000)
     assert dec.plan is None
@@ -220,9 +221,21 @@ def test_max_concurrent_positions() -> None:
     re = _re(config=cfg)
     d1 = re.evaluate(_plan(), equity_usd=10_000)
     assert d1.plan is not None
+    re.on_position_opened(d1.plan)   # позиція реально відкрилась
     d2 = re.evaluate(_plan(), equity_usd=10_000)
     assert d2.plan is None
     assert d2.reason == "max_concurrent_positions"
+
+
+def test_evaluate_does_not_increment_until_position_opened() -> None:
+    """Регресія для бага "5 годин без трейдів": evaluate() не має робити
+    side effects, бо position.open() може потім впасти, а counter залишиться."""
+    cfg = RiskConfig(max_concurrent_positions=1)
+    re = _re(config=cfg)
+    re.evaluate(_plan(), equity_usd=10_000)   # accepted, але on_position_opened НЕ викликаний
+    # Лічильник має лишитись 0, наступний evaluate має пройти
+    d2 = re.evaluate(_plan(), equity_usd=10_000)
+    assert d2.plan is not None, "evaluate() не має блокувати наступні setups до position_opened"
 
 
 def test_initiative_quota() -> None:
@@ -233,6 +246,7 @@ def test_initiative_quota() -> None:
     p1 = re.evaluate(_plan(direction=Direction.SHORT, entry=100.0, stop=100.5,
                            regime=Regime.TRENDING_UP), equity_usd=10_000).plan
     assert p1 is not None
+    re.on_position_opened(p1)
     re.on_position_closed(_outcome(p1, realized_r=0.5, trade_id="t1"))
     d2 = re.evaluate(_plan(direction=Direction.SHORT, entry=100.0, stop=100.5,
                            regime=Regime.TRENDING_UP), equity_usd=10_000)
@@ -331,6 +345,7 @@ def test_snapshot_has_open_positions_count() -> None:
     assert snap0.open_positions == 0
     p = re.evaluate(_plan(), equity_usd=10_000).plan
     assert p is not None
+    re.on_position_opened(p)   # Orchestrator fires this after successful open
     snap1 = re.snapshot(10_000)
     assert snap1.open_positions == 1
     re.on_position_closed(_outcome(p, realized_r=0.5, trade_id="t0"))

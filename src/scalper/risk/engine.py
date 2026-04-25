@@ -184,18 +184,19 @@ class RiskEngine:
             risk_usd=risk_usd,
             risk_gate_passed=True,
         )
-
-        self._state.open_positions_count += 1
-        self._state.daily.trades_count += 1
-        if is_initiative:
-            self._state.daily.initiative_trades_count += 1
-
+        # ВАЖЛИВО: НЕ інкрементуємо лічильники тут. Якщо position.open()
+        # потім впаде (no symbol filters, exchange reject) — counter залишиться
+        # переанкрементованим і всі майбутні setups блокуватимуться як
+        # "max_concurrent_positions". Інкремент робить on_position_opened(),
+        # який Orchestrator викликає лише при успішному відкритті.
         return RiskDecision(plan=accepted, reason=None, snapshot=snapshot)
 
     def on_position_opened(self, plan: TradePlan) -> None:
-        # evaluate() вже інкрементує — цей callback для додаткової синхронізації
-        # у майбутньому (наприклад, коли Execution насправді підтвердив FILL).
-        pass
+        """Викликається Orchestrator-ом ТІЛЬКИ після успішного position.open()."""
+        self._state.open_positions_count += 1
+        self._state.daily.trades_count += 1
+        if self._is_initiative(plan):
+            self._state.daily.initiative_trades_count += 1
 
     def on_position_closed(self, outcome: TradeOutcome) -> None:
         # Ідемпотентність: той самий trade_id не рахуємо двічі

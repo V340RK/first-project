@@ -16,6 +16,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -32,6 +33,7 @@ class BotRunParams:
     equity_usd: float
     mode: str = "live"                    # "live" | "paper"
     score_threshold_override: float | None = None
+    relaxed_regime: bool = False              # для testnet/paper — знімає LOW_LIQ блок
 
 
 @dataclass
@@ -52,13 +54,16 @@ class BotController:
         project_root: Path,
         runtime_config_path: Path,
         python_exe: Path | str | None = None,
+        log_dir: Path | None = None,
     ) -> None:
         self._project_root = project_root
         self._runtime_config_path = runtime_config_path
         self._python = str(python_exe) if python_exe else sys.executable
+        self._log_dir = log_dir or (project_root / "logs")
         self._proc: subprocess.Popen[bytes] | None = None
         self._started_at_ms: int | None = None
         self._last_params: BotRunParams | None = None
+        self._log_file: Any = None
 
     # === Public ===
 
@@ -98,13 +103,24 @@ class BotController:
             # CREATE_NEW_PROCESS_GROUP дозволяє посилати CTRL_BREAK_EVENT на Windows.
             creationflags = subprocess.CREATE_NEW_PROCESS_GROUP   # type: ignore[attr-defined]
 
-        logger.info("starting bot subprocess: %s", " ".join(cmd))
+        # CRITICAL: stdout/stderr → файл, інакше помилки бота невидимі.
+        # Раніше було DEVNULL — 5 годин розбирали "чому немає трейдів",
+        # а logger.error("entry order rejected") писалося в нікуди.
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = self._log_dir / f"bot_{params.symbol}.log"
+        self._log_file = log_path.open("a", encoding="utf-8", buffering=1)
+        self._log_file.write(
+            f"\n=== START {time.strftime('%Y-%m-%d %H:%M:%S')} pid=? "
+            f"params={params} ===\n"
+        )
+
+        logger.info("starting bot subprocess: %s (logs → %s)", " ".join(cmd), log_path)
         self._proc = subprocess.Popen(
             cmd,
             cwd=str(self._project_root),
             creationflags=creationflags,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=self._log_file,
+            stderr=subprocess.STDOUT,   # stderr у той самий файл
         )
         self._started_at_ms = int(time.time() * 1000)
         self._last_params = params
@@ -138,6 +154,12 @@ class BotController:
         final = self.status()
         self._proc = None
         self._started_at_ms = None
+        if self._log_file is not None:
+            try:
+                self._log_file.close()
+            except Exception:
+                pass
+            self._log_file = None
         return final
 
     # === Internal ===
@@ -152,10 +174,13 @@ class BotController:
                 "risk_per_trade_usd_abs": params.risk_per_trade_usd,
             },
         }
+        decision_section: dict = {}
         if params.score_threshold_override is not None:
-            config_dict["decision"] = {
-                "base_score_threshold": params.score_threshold_override,
-            }
+            decision_section["base_score_threshold"] = params.score_threshold_override
+        if params.relaxed_regime:
+            decision_section["relaxed_regime"] = True
+        if decision_section:
+            config_dict["decision"] = decision_section
 
         self._runtime_config_path.parent.mkdir(parents=True, exist_ok=True)
         with self._runtime_config_path.open("w", encoding="utf-8") as f:

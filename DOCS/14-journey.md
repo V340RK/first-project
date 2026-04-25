@@ -161,6 +161,20 @@ risk:
 | 6 | "Має бути окремо під кожну пару" | Один процес, один config на список пар = немає per-pair контролю | Refactor: `BotRegistry` — один процес-bot на символ; `SessionStats` per-symbol; UI slot-cards |
 | 7 | "Баланс має підтягуватись з бінансу" | Користувач вводив equity_usd вручну, бот рахував позиції на фейкових цифрах | `BinanceAccountService` (`/fapi/v2/account`) → `/api/account/balance`; equity автоматично береться з real `available_balance` при start |
 
+### Великий debug "5 годин без жодної угоди"
+
+Користувач: «бот пропрацював 5 годин і не зробив жодної угоди». Розкопано **5 окремих багів**, що збиралися каскадом:
+
+| # | Симптом у журналі | Корінь | Фікс |
+|---|---|---|---|
+| 8 | `risk_accepted=3, position_opened=0` | `__main__.py` ніколи не викликав `execution.register_symbol(filters)` → SimulatedExecutionEngine відмовляв кожен `place_order` як `no_symbol_filters` → `position.open()` повертала `False` | Після `gateway.start()` — для кожного символу вичитуємо `gateway.get_symbol_filters()` і реєструємо в execution. Логуємо `tick/step/min_qty/min_notional` |
+| 9 | Помилки невидимі — журнал нічого не показував про реджект | `BotController` запускав subprocess з `stdout=DEVNULL stderr=DEVNULL` → `logger.error("entry order rejected")` йшов у нікуди | `stdout` → `logs/bot_{SYMBOL}.log` файл; stderr → той самий потік. Заголовок `=== START YYYY-MM-DD HH:MM:SS params=... ===` для розмежування сесій |
+| 10 | `risk_rejected=53 max_concurrent_positions` після єдиного `risk_accepted` | `RiskEngine.evaluate()` сам інкрементував `open_positions_count` ще ДО успішного `position.open()`. Якщо open() падав — counter залишався переанкрементованим, всі майбутні setups блокувалися | Винесено інкремент у `on_position_opened()`; Orchestrator викликає його лише при `opened=True`. Додано regression-тест `test_evaluate_does_not_increment_until_position_opened` |
+| 11 | Після фіксу #8: pipeline взагалі перестав тригеритись (0 setup_candidate) | `MarketDataGateway.on_agg_trade()` тримав `_cb_agg_trade: AggTradeCallback \| None` — ОДИН callback. Мій новий `__main__.py:on_agg_trade(_tick_pending)` (для feeding sim execution) ПЕРЕТЕР Orchestrator-ів `_on_agg_trade_tick` | Усі Gateway callbacks (`agg_trade`, `depth_diff`, `kline`, `book_ticker`, `user_event`) перероблено в `list[Callback]`, кожен `on_xxx()` — append, dispatch у циклі з per-callback try/except |
+| 12 | Після всіх фіксів: 20 setup_candidate за 3 хв, але 100% rejected `setup_blocked_in_regime:low_liq` | На testnet ринок постійно у `LOW_LIQ` (мало активності — це факт середовища, не баг). За дефолтом `regime_allow_map[LOW_LIQ] = set()` блокує ВСІ setup-и | Додано `DecisionConfig.relaxed_regime: bool = False`. Якщо True — фільтр `regime_allow_map` пропускається. Dashboard server авто-вмикає при `BINANCE_TESTNET=true` (record у `runtime_{SYMBOL}.yaml: decision.relaxed_regime: true`). На проді (testnet=False) сувора фільтрація залишається |
+
+**Перший живий трейд:** після всіх фіксів — `setup_candidate → decision_accepted (regime: low_liq, relaxed) → risk_accepted (qty=0.123 BTC, risk=$1.99) → position_opened (SHORT @ 77531.6, stop @ 77547.7)` за 90 секунд.
+
 ---
 
 ## Що лишилось до prod

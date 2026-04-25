@@ -210,11 +210,19 @@ class DashboardServer:
             else:
                 equity_usd = 100.0   # only for tests без account_service
 
+            # На testnet ринок постійно у LOW_LIQ → DecisionEngine блокує всі
+            # setup-и за дефолтом. Знімаємо цей блок для testnet, щоб бот міг
+            # реально торгувати тестовими грошима. На проді (testnet=False)
+            # сувора фільтрація залишається.
+            import os as _os
+            relaxed = _os.environ.get("BINANCE_TESTNET", "true").strip().lower() in ("1", "true", "yes", "on")
+
             params = BotRunParams(
                 symbol=sym, leverage=req.leverage,
                 risk_per_trade_usd=req.risk_per_trade_usd,
                 equity_usd=equity_usd, mode=req.mode,
                 score_threshold_override=req.score_threshold_override,
+                relaxed_regime=relaxed,
             )
             self._stats.reset(sym)
             status = self._registry.start(params)

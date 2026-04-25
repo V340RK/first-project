@@ -28,4 +28,5 @@ configs/runtime.yaml
 configs/runtime_*.yaml
 
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 tmp_journal/

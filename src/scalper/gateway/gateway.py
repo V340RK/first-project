@@ -65,12 +65,16 @@ class MarketDataGateway:
         self._notifier = notifier
         self._transport = transport or _RestTransport(config)
 
-        # Callback-и: один споживач на тип події. Якщо нема — подія тихо скіпається.
-        self._cb_agg_trade: AggTradeCallback | None = None
-        self._cb_depth_diff: DepthDiffCallback | None = None
-        self._cb_kline: KlineCallback | None = None
-        self._cb_book_ticker: BookTickerCallback | None = None
-        self._cb_user_event: UserEventCallback | None = None
+        # Callback-и: список підписників на тип події. on_xxx() ДОДАЄ в список,
+        # не перетирає. Інакше другий підписник тихо викидає першого
+        # (Orchestrator виставляв on_agg_trade до того як __main__.py додав
+        # свій для sim execution → Orchestrator-ів був перетертий, pipeline
+        # переставав тригеритись — баг "5 годин без трейдів" #2).
+        self._cbs_agg_trade: list[AggTradeCallback] = []
+        self._cbs_depth_diff: list[DepthDiffCallback] = []
+        self._cbs_kline: list[KlineCallback] = []
+        self._cbs_book_ticker: list[BookTickerCallback] = []
+        self._cbs_user_event: list[UserEventCallback] = []
 
         # Стан runtime — НЕ персистимо (рестарт = свіжий стан).
         self._symbols: list[str] = []
@@ -124,19 +128,19 @@ class MarketDataGateway:
     # === Підписки ===
 
     def on_agg_trade(self, callback: AggTradeCallback) -> None:
-        self._cb_agg_trade = callback
+        self._cbs_agg_trade.append(callback)
 
     def on_depth_diff(self, callback: DepthDiffCallback) -> None:
-        self._cb_depth_diff = callback
+        self._cbs_depth_diff.append(callback)
 
     def on_kline_close(self, callback: KlineCallback) -> None:
-        self._cb_kline = callback
+        self._cbs_kline.append(callback)
 
     def on_book_ticker(self, callback: BookTickerCallback) -> None:
-        self._cb_book_ticker = callback
+        self._cbs_book_ticker.append(callback)
 
     def on_user_event(self, callback: UserEventCallback) -> None:
-        self._cb_user_event = callback
+        self._cbs_user_event.append(callback)
 
     # === REST для warmup / reinit ===
 
@@ -248,26 +252,34 @@ class MarketDataGateway:
                 delay = min(delay * 2, max_delay)
 
     async def _dispatch_market(self, stream: str, data: dict[str, object]) -> None:
-        """Маршрутизація однієї події в callback. Тип каналу визначаємо по підрядку."""
+        """Маршрутизація однієї події у ВСІХ підписників на тип. Один поганий
+        callback не зупиняє решту — кожен у своєму try/except."""
         try:
             if "@aggTrade" in stream:
-                if self._cb_agg_trade:
-                    await self._cb_agg_trade(parse_agg_trade(data))
+                ev = parse_agg_trade(data)
+                for cb in self._cbs_agg_trade:
+                    try: await cb(ev)
+                    except Exception: logger.exception("agg_trade cb failed")
             elif "@depth" in stream:
-                if self._cb_depth_diff:
-                    await self._cb_depth_diff(parse_depth_diff(data))
+                ev = parse_depth_diff(data)
+                for cb in self._cbs_depth_diff:
+                    try: await cb(ev)
+                    except Exception: logger.exception("depth_diff cb failed")
             elif "@kline" in stream:
                 kline = parse_kline(data)
-                if kline.is_closed and self._cb_kline:
-                    await self._cb_kline(kline)
+                if kline.is_closed:
+                    for cb in self._cbs_kline:
+                        try: await cb(kline)
+                        except Exception: logger.exception("kline cb failed")
             elif "@bookTicker" in stream:
-                if self._cb_book_ticker:
-                    await self._cb_book_ticker(parse_book_ticker(data))
+                ev = parse_book_ticker(data)
+                for cb in self._cbs_book_ticker:
+                    try: await cb(ev)
+                    except Exception: logger.exception("book_ticker cb failed")
             else:
                 logger.debug("Unknown stream: %s", stream)
         except Exception:
-            # Якщо callback кинув — логуємо, але WS-loop НЕ падає (інакше пропустимо всі майбутні).
-            logger.exception("Callback failed for stream %s", stream)
+            logger.exception("dispatch_market failed for stream %s", stream)
 
     # === Internal: time sync ===
 
@@ -356,9 +368,9 @@ class MarketDataGateway:
                             if event.event_type == "listenKeyExpired":
                                 logger.warning("listenKey expired — re-creating")
                                 break
-                            if self._cb_user_event:
+                            for cb in self._cbs_user_event:
                                 try:
-                                    await self._cb_user_event(event)
+                                    await cb(event)
                                 except Exception:
                                     logger.exception("user_event callback failed")
                     finally:

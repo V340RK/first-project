@@ -39,6 +39,12 @@ class DecisionConfig(BaseModel):
     threshold_boost_choppy: float = 0.2
     threshold_boost_per_loss: float = 0.1
 
+    # Testnet/dev режим: знімає блок regime для LOW_LIQ/CHOPPY/HIGH_VOL — там
+    # дозволяються всі setup-и. Прод-default = False (сувора фільтрація).
+    # Без цього на testnet (де майже завжди LOW_LIQ через малу активність)
+    # бот ніколи не торгує.
+    relaxed_regime: bool = False
+
     cooldown_per_setup_ms: int = Field(default=30_000, ge=0)
     cooldown_per_symbol_ms: int = Field(default=5_000, ge=0)
 
